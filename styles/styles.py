@@ -299,4 +299,70 @@ class AppStyles:
             height: 1px;
             margin: 10px 0;
         }}
+        
+        * ── Sidebar Component Styles ─────────────────────────────────────── */
+        QWidget#SideMenu {{
+            background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 {SLATE_900}, stop:1 {SLATE_800});
+            min-width: 260px;
+            border-right: 1px solid rgba(255,255,255,0.06);
+        }}
+        
+        #SideMenu #MenuLabel {{
+            font-size: 11px;
+            font-weight: 700;
+            color: {SLATE_400};
+            padding: 16px 20px 8px 20px;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }}
+        
+        #SideMenu QPushButton {{
+            background: transparent;
+            color: {SLATE_300};
+            border: none;
+            text-align: left;
+            padding: 14px 20px;
+            font-size: 14px;
+            font-weight: 500;
+            border-radius: 10px;
+            margin: 2px 12px;
+        }}
+        
+        #SideMenu QPushButton:hover {{
+            background: rgba(255,255,255,0.07);
+            color: white;
+            padding-left: 24px;
+        }}
+        
+        #SideMenu QPushButton:checked {{
+            background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 {TEAL_600}, stop:1 {TEAL_500});
+            font-weight: 600;
+            color: white;
+        }}
+        
+        QFrame#SidebarSeparator {{
+            background: rgba(255,255,255,0.10);
+            height: 1px;
+            margin: 10px 0;
+        }}
+
+        /* ── Logout Button Style (Global Definition) ─────────────────────── */
+        QPushButton#LogoutButton {{
+            background: transparent;
+            color: {RED_500};
+            border: none;
+            text-align: left;
+            padding: 12px 20px;
+            font-size: 14px;
+            font-weight: 600;
+            border-radius: 10px;
+            margin: 2px 12px;
+        }}
+
+        QPushButton#LogoutButton:hover {{
+            background: rgba(239, 68, 68, 0.1);
+            color: #F87171;
+            padding-left: 24px;
+        }}
+
     """

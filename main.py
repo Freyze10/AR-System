@@ -11,7 +11,7 @@ from styles.styles import AppStyles
 from menu.ar_report import AcknowledgementReceiptWidget
 
 class MainWindow(QMainWindow):
-    logout_requested = pyqtSignal()  # Signal to handle controller routing if needed
+    logout_requested = pyqtSignal()
 
     def __init__(self, username="Brant", role="IT ADMIN"):
         super().__init__()
@@ -36,7 +36,7 @@ class MainWindow(QMainWindow):
         # Build Content Stack Panel
         self.stacked_widget = QStackedWidget()
         self.stacked_widget.addWidget(AcknowledgementReceiptWidget())  # Index 0: AR Report
-        self.stacked_widget.addWidget(QWidget())  # Index 1: Audit Trail Placeholder
+        self.stacked_widget.addWidget(QWidget())                       # Index 1: Audit Trail Placeholder
 
         main_layout.addWidget(self.stacked_widget)
         self.setCentralWidget(main_widget)
@@ -80,40 +80,20 @@ class MainWindow(QMainWindow):
 
         self.btn_ar_report = self.create_menu_button(" AR Report", "fa5s.file-invoice", 0)
         self.btn_audit_trail = self.create_menu_button(" Audit Trail", "fa5s.history", 1)
-
-        # Set default active selection state to AR Report
         self.btn_ar_report.setChecked(True)
 
         layout.addWidget(self.btn_ar_report)
         layout.addWidget(self.btn_audit_trail)
 
-        # Stretch layout spacer to push menu items up and anchor logout to bottom
+        # Spacer
         layout.addStretch(1)
 
-        # Bottom Separator & Logout Button
+        # 3. LOGOUT BUTTON (Cleanly styled via Global QSS Object Name)
         sep_bottom = QFrame(frameShape=QFrame.Shape.HLine, objectName="SidebarSeparator")
         layout.addWidget(sep_bottom)
 
         self.btn_logout = QPushButton("  Logout", icon=fa.icon('fa5s.sign-out-alt', color="#EF4444"))
-        # Specific inline/state override for logout to give it a danger/subtle hover tone
-        self.btn_logout.setStyleSheet("""
-            QPushButton {
-                background: transparent;
-                color: #EF4444;
-                border: none;
-                text-align: left;
-                padding: 12px 20px;
-                font-size: 14px;
-                font-weight: 600;
-                border-radius: 10px;
-                margin: 2px 12px;
-            }
-            QPushButton:hover {
-                background: rgba(239, 68, 68, 0.1);
-                color: #F87171;
-                padding-left: 24px;
-            }
-        """)
+        self.btn_logout.setObjectName("LogoutButton") # <--- Links directly to global QSS selector
         self.btn_logout.clicked.connect(self.handle_logout)
         layout.addWidget(self.btn_logout)
 

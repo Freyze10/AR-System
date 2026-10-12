@@ -120,6 +120,9 @@ class SyncAR(QObject):
 
     def run(self):
         try:
+            dbf = dbfread.DBF(AR_SECONDARY_DBF_PATH, encoding='latin1', parserclass=SafeDBFParser)
+            print(dbf.field_names)
+            print(next(iter(dbf)))
             self.progress.emit("Phase 1/2: Reading AR secondary and primary records from DBF files...")
 
             # 1. READ AR SECONDARY ITEMS (tbl_del02.dbf)
@@ -134,11 +137,11 @@ class SyncAR(QObject):
 
                     items_by_ar_no[ar_no].append({
                         "ar_no": ar_no,
-                        "quantity": _to_float(item.get('T_WTPERPACK')),
+                        "quantity": _to_float(item.get('T_WTPERPAC')),
                         "qty_unit": _to_str(item.get('T_UNITWT')),
                         "sequence": _to_int(item.get('T_SEQ')),
                         "prod_code": _to_str(item.get('T_PRODCODE')),
-                        "prod_color": _to_str(item.get('T_PRODCOLOR')),
+                        "prod_color": _to_str(item.get('T_PRODCOLO')),
                         "lot_no": _to_str(item.get('T_DESC1')),
                         "notes": _to_str(item.get('T_DESC2'))
                     })

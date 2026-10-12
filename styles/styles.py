@@ -59,6 +59,27 @@ class AppStyles:
             color: {SLATE_900};
         }}
 
+        QLabel#SubtitleLabel {{
+            font-size: 13px;
+            color: {SLATE_500};
+        }}
+
+        /* Summary card (selected record) */
+        QLabel#SummaryLabel {{
+            background: transparent;
+            font-size: 11px;
+            font-weight: 700;
+            color: {SLATE_400};
+            letter-spacing: 0.08em;
+        }}
+
+        QLabel#SummaryValue {{
+            background: transparent;
+            font-size: 20px;
+            font-weight: 700;
+            color: {TEAL_600};
+        }}
+
         /* ── Form Inputs (Inputs, Dropdowns, DatePickers) ─────────────────── */
         QLineEdit, QComboBox, QDateEdit, QTextEdit {{
             background: white;
@@ -139,6 +160,11 @@ class AppStyles:
             background: {SLATE_900};
         }}
 
+        QPushButton#SecondaryButton:disabled {{
+            background: {SLATE_100};
+            color: {SLATE_400};
+        }}
+
         /* Semantic Buttons */
         QPushButton#SuccessButton   {{ background: {EMERALD_500}; color: white; border: none; font-weight: 600; }}
         QPushButton#SuccessButton:hover {{ background: {EMERALD_600}; }}
@@ -151,9 +177,11 @@ class AppStyles:
             border: 1px solid {SLATE_200};
             border-radius: 8px;
             background-color: white;
+            alternate-background-color: {SLATE_50};
             gridline-color: {SLATE_100};
             selection-background-color: {TEAL_100};
             selection-color: {SLATE_900};
+            outline: 0;
         }}
 
         QTableWidget::item, QTableView::item {{
@@ -236,7 +264,7 @@ class AppStyles:
         QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
             height: 0px;
         }}
-        
+
         /* ── Sidebar Component Styles ─────────────────────────────────────── */
         QWidget#SideMenu {{
             background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 {SLATE_900}, stop:1 {SLATE_800});
@@ -247,20 +275,19 @@ class AppStyles:
             background: transparent;
             color: white;
         }}
-        
+
         #SideMenu QWidget QLabel {{
             color: white;
             background: transparent;
         }}
-        
-        /* Optional: give the profile a subtle professional card effect inside the dark menu */
+
         #SideMenu QWidget#ProfileCard {{
             background: rgba(255, 255, 255, 0.05);
             border-radius: 8px;
             margin: 8px 8px 0px 8px;
             padding: 4px;
         }}
-        
+
         #SideMenu #MenuLabel {{
             font-size: 11px;
             font-weight: 700;
@@ -269,7 +296,7 @@ class AppStyles:
             letter-spacing: 0.08em;
             text-transform: uppercase;
         }}
-        
+
         #SideMenu QPushButton {{
             background: transparent;
             color: {SLATE_300};
@@ -281,65 +308,19 @@ class AppStyles:
             border-radius: 10px;
             margin: 2px 12px;
         }}
-        
+
         #SideMenu QPushButton:hover {{
             background: rgba(255,255,255,0.07);
             color: white;
             padding-left: 24px;
         }}
-        
+
         #SideMenu QPushButton:checked {{
             background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 {TEAL_600}, stop:1 {TEAL_500});
             font-weight: 600;
             color: white;
         }}
-        
-        QFrame#SidebarSeparator {{
-            background: rgba(255,255,255,0.10);
-            height: 1px;
-            margin: 10px 0;
-        }}
-        
-        * ── Sidebar Component Styles ─────────────────────────────────────── */
-        QWidget#SideMenu {{
-            background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 {SLATE_900}, stop:1 {SLATE_800});
-            min-width: 260px;
-            border-right: 1px solid rgba(255,255,255,0.06);
-        }}
-        
-        #SideMenu #MenuLabel {{
-            font-size: 11px;
-            font-weight: 700;
-            color: {SLATE_400};
-            padding: 16px 20px 8px 20px;
-            letter-spacing: 0.08em;
-            text-transform: uppercase;
-        }}
-        
-        #SideMenu QPushButton {{
-            background: transparent;
-            color: {SLATE_300};
-            border: none;
-            text-align: left;
-            padding: 14px 20px;
-            font-size: 14px;
-            font-weight: 500;
-            border-radius: 10px;
-            margin: 2px 12px;
-        }}
-        
-        #SideMenu QPushButton:hover {{
-            background: rgba(255,255,255,0.07);
-            color: white;
-            padding-left: 24px;
-        }}
-        
-        #SideMenu QPushButton:checked {{
-            background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 {TEAL_600}, stop:1 {TEAL_500});
-            font-weight: 600;
-            color: white;
-        }}
-        
+
         QFrame#SidebarSeparator {{
             background: rgba(255,255,255,0.10);
             height: 1px;

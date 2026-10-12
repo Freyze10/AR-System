@@ -7,6 +7,8 @@ from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
     QLabel, QFrame, QPushButton, QStackedWidget, QStatusBar, QMessageBox
 )
+
+from db.schema import create_table
 from styles.styles import AppStyles
 from menu.ar_report import AcknowledgementReceiptWidget
 
@@ -21,6 +23,8 @@ class MainWindow(QMainWindow):
         self.setGeometry(100, 100, 1300, 700)
         self.showMaximized()
         self.init_ui()
+
+        create_table()
 
     def init_ui(self):
         self.setStyleSheet(AppStyles.GLOBAL_STYLESHEET)

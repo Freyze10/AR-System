@@ -21,7 +21,7 @@ DB_CONFIG = {
 }
 temp_conn.close()
 
-# --- DBF Legacy File Paths for AR ---
+# --- DBF Legacy File Paths for ar_report ---
 DBF_AR_BASE_PATH = r'\\System-server\mbpi ar\FORMS\DBINV-2'
 AR_PRIMARY_DBF_PATH = os.path.join(DBF_AR_BASE_PATH, 'tbl_del01.dbf')
 AR_SECONDARY_DBF_PATH = os.path.join(DBF_AR_BASE_PATH, 'tbl_del02.dbf')
@@ -30,7 +30,7 @@ try:
     db_url = f"postgresql+psycopg2://{DB_CONFIG['user']}:{DB_CONFIG['password']}@{DB_CONFIG['host']}:{DB_CONFIG['port']}/{DB_CONFIG['dbname']}"
     engine = create_engine(db_url, pool_pre_ping=True, pool_recycle=3600)
 except Exception as e:
-    print(f"CRITICAL: Could not create database engine for AR Sync. Error: {e}")
+    print(f"CRITICAL: Could not create database engine for ar_report Sync. Error: {e}")
 
 
 # --- Custom Safe DBF Parser to Handle Null Bytes (\x00) for Numbers, Dates, and Logicals ---
@@ -123,9 +123,9 @@ class SyncAR(QObject):
             dbf = dbfread.DBF(AR_SECONDARY_DBF_PATH, encoding='latin1', parserclass=SafeDBFParser)
             print(dbf.field_names)
             print(next(iter(dbf)))
-            self.progress.emit("Phase 1/2: Reading AR secondary and primary records from DBF files...")
+            self.progress.emit("Phase 1/2: Reading ar_report secondary and primary records from DBF files...")
 
-            # 1. READ AR SECONDARY ITEMS (tbl_del02.dbf)
+            # 1. READ ar_report SECONDARY ITEMS (tbl_del02.dbf)
             items_by_ar_no = collections.defaultdict(list)
             if os.path.exists(AR_SECONDARY_DBF_PATH):
                 dbf_ar_items = dbfread.DBF(AR_SECONDARY_DBF_PATH, encoding='latin1', char_decode_errors='ignore',
@@ -146,7 +146,7 @@ class SyncAR(QObject):
                         "notes": _to_str(item.get('T_DESC2'))
                     })
 
-            # 2. READ AR PRIMARY RECORDS (tbl_del01.dbf)
+            # 2. READ ar_report PRIMARY RECORDS (tbl_del01.dbf)
             primary_ar_recs = []
             if os.path.exists(AR_PRIMARY_DBF_PATH):
                 dbf_primary_ar = dbfread.DBF(AR_PRIMARY_DBF_PATH, encoding='latin1',
@@ -201,13 +201,13 @@ class SyncAR(QObject):
                     })
 
             if not primary_ar_recs:
-                self.finished.emit(True, "Sync Info: No valid AR records found with dates.")
+                self.finished.emit(True, "Sync Info: No valid ar_report records found with dates.")
                 return
 
-            self.progress.emit("Phase 2/2: Synchronizing AR records to PostgreSQL...")
+            self.progress.emit("Phase 2/2: Synchronizing ar_report records to PostgreSQL...")
             with engine.connect() as conn:
                 with conn.begin():
-                    # --- AR HEADERS SYNC (UPSERT) ---
+                    # --- ar_report HEADERS SYNC (UPSERT) ---
                     conn.execute(text("""
                         INSERT INTO tbl_ar01 (ar_no, ar_date, customer, t_items, encoded_by, updated_by, encoded_on, updated_on, is_canceled, is_printed)
                         VALUES (:ar_no, :ar_date, :customer, :t_items, :encoded_by, :updated_by, :encoded_on, :updated_on, :is_canceled, :is_printed)
@@ -221,7 +221,7 @@ class SyncAR(QObject):
                             is_printed = EXCLUDED.is_printed;
                     """), primary_ar_recs)
 
-                    # --- AR DETAILS SYNC (UPSERT) ---
+                    # --- ar_report DETAILS SYNC (UPSERT) ---
                     all_ar_items = [item for r in primary_ar_recs for item in items_by_ar_no.get(r['ar_no'], [])]
                     if all_ar_items:
                         conn.execute(text("""
@@ -230,11 +230,11 @@ class SyncAR(QObject):
                             ON CONFLICT DO NOTHING;
                         """), all_ar_items)
 
-            self.finished.emit(True, "AR Legacy mirror completed successfully.")
+            self.finished.emit(True, "ar_report Legacy mirror completed successfully.")
 
         except Exception as e:
             traceback.print_exc()
-            self.finished.emit(False, f"Critical AR Sync Error: {e}")
+            self.finished.emit(False, f"Critical ar_report Sync Error: {e}")
 
 
 if __name__ == "__main__":
@@ -250,7 +250,7 @@ if __name__ == "__main__":
         app.quit()
 
 
-    print("Initializing standalone AR Sync execution...")
+    print("Initializing standalone ar_report Sync execution...")
     syncer = SyncAR()
     syncer.progress.connect(on_progress)
     syncer.finished.connect(on_finished)

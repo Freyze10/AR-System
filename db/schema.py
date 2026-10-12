@@ -52,7 +52,7 @@ def create_table():
             )
         """)
 
-        # 4. Tbl AR
+        # 4. Tbl ar_report
         cursor.execute("""
                     CREATE TABLE IF NOT EXISTS tbl_ar01(
                         id SERIAL PRIMARY KEY,

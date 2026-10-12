@@ -10,7 +10,7 @@ from PyQt6.QtWidgets import (
 
 from db.schema import create_table
 from styles.styles import AppStyles
-from menu.ar_report import AcknowledgementReceiptWidget
+from menu.ar_report.ar_report import AcknowledgementReceiptWidget
 
 class MainWindow(QMainWindow):
     logout_requested = pyqtSignal()
@@ -19,7 +19,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.username = username
         self.role = role
-        self.setWindowTitle("AR-SYSTEM-2017 | MASTERBATCH PHILIPPINES INCORPORATED")
+        self.setWindowTitle("AR_REPORT-SYSTEM-2026 | MASTERBATCH PHILIPPINES INCORPORATED")
         self.setGeometry(100, 100, 1300, 700)
         self.showMaximized()
         self.init_ui()
@@ -39,7 +39,7 @@ class MainWindow(QMainWindow):
 
         # Build Content Stack Panel
         self.stacked_widget = QStackedWidget()
-        self.stacked_widget.addWidget(AcknowledgementReceiptWidget())  # Index 0: AR Report
+        self.stacked_widget.addWidget(AcknowledgementReceiptWidget())  # Index 0: ar_report Report
         self.stacked_widget.addWidget(QWidget())                       # Index 1: Audit Trail Placeholder
 
         main_layout.addWidget(self.stacked_widget)

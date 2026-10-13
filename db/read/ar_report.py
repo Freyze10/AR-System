@@ -1,5 +1,24 @@
 from db.connection import get_connection
 
+# (label shown in the combo box, key)
+SEARCH_COLUMNS = [
+    ("All Columns", "all"),
+    ("AR No.", "ar_no"),
+    ("AR Date", "ar_date"),
+    ("Customer", "customer"),
+    ("Product Code", "prod_code"),
+    ("Product Color", "prod_color"),
+]
+
+# SQL expression per key. These are fixed strings, never built from user input.
+_SEARCH = {
+    "ar_no": "CAST(h.ar_no AS TEXT)",
+    "ar_date": "TO_CHAR(h.ar_date, 'MM/DD/YYYY')",   # same format the table shows
+    "customer": "h.customer",
+    "prod_code": "d.prod_code",
+    "prod_color": "d.prod_color",
+}
+
 
 def _fetch(sql, params=None):
     conn = get_connection()
@@ -11,24 +30,32 @@ def _fetch(sql, params=None):
         conn.close()
 
 
-def get_records(search, limit):
-    """One row per item:
+def _like(text):
+    """Escape LIKE wildcards so '%' and '_' in the search box are matched literally."""
+    escaped = text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    return f"%{escaped}%"
+
+
+def get_records(search="", column="all"):
+    """One row per item, no row limit:
     (ar_no, ar_date, customer, prod_code, prod_color, quantity, qty_unit, is_canceled, item_count)"""
-    return _fetch("""
+    where, params = "", []
+    search = (search or "").strip()
+    if search:
+        exprs = [_SEARCH[column]] if column in _SEARCH else list(_SEARCH.values())
+        where = "WHERE (" + " OR ".join(f"{e} ILIKE %s" for e in exprs) + ")"
+        params = [_like(search)] * len(exprs)
+
+    return _fetch(f"""
         SELECT h.ar_no, h.ar_date, h.customer, d.prod_code, d.prod_color,
                d.quantity, d.qty_unit, h.is_canceled, COALESCE(c.item_count, 0)
         FROM tbl_ar01 h
         LEFT JOIN tbl_ar02 d ON d.ar_no = h.ar_no
         LEFT JOIN (SELECT ar_no, COUNT(*) AS item_count
                    FROM tbl_ar02 GROUP BY ar_no) c ON c.ar_no = h.ar_no
-        WHERE (%(q)s = ''
-               OR CAST(h.ar_no AS TEXT) ILIKE %(like)s
-               OR h.customer   ILIKE %(like)s
-               OR d.prod_code  ILIKE %(like)s
-               OR d.prod_color ILIKE %(like)s)
+        {where}
         ORDER BY h.ar_no DESC, d.sequence
-        LIMIT %(limit)s
-    """, {"q": search, "like": f"%{search}%", "limit": limit})
+    """, params)
 
 
 def get_receipt(ar_no):

@@ -1,14 +1,12 @@
 import qtawesome as fa
-from PyQt6.QtCore import Qt, QAbstractTableModel, QModelIndex, pyqtSignal
+from PyQt6.QtCore import Qt, QAbstractTableModel, QModelIndex, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QComboBox,
     QTableView, QHeaderView, QFrame, QAbstractItemView, QMessageBox
 )
 
-from db.read.ar_report import get_records
-
-ROW_LIMIT = 5000
+from db.read.ar_report import SEARCH_COLUMNS, get_records
 
 COLUMNS = ["AR No.", "AR Date", "Customer", "Product Code", "Product Color", "Quantity / Unit", "Count"]
 
@@ -23,6 +21,18 @@ CANCELED_BG = QColor("#FEF2F2")
 
 def _icon(name, color, active=None):
     return fa.icon(name, color=color, color_active=active or color, color_disabled="#94A3B8")
+
+
+def finished_typing(line_edit, callback, delay=400):
+    """Calls `callback` once the user has stopped typing in `line_edit` for `delay` ms.
+    Returns the timer so the caller can stop it."""
+    timer = QTimer(line_edit)
+    timer.setSingleShot(True)
+    timer.timeout.connect(callback)
+
+    # Restart the timer on every text change
+    line_edit.textChanged.connect(lambda: timer.start(delay))
+    return timer
 
 
 class ARTableModel(QAbstractTableModel):
@@ -103,7 +113,7 @@ class ARRecordsTab(QWidget):
         root.setContentsMargins(24, 24, 24, 24)
         root.setSpacing(16)
 
-        # Header: title + search
+        # Header: title + column choice + search
         header = QHBoxLayout()
         titles = QVBoxLayout()
         titles.setSpacing(2)
@@ -116,11 +126,21 @@ class ARRecordsTab(QWidget):
         header.addLayout(titles)
         header.addStretch(1)
 
+        self.cmb_column = QComboBox()
+        for label, key in SEARCH_COLUMNS:
+            self.cmb_column.addItem(label, key)
+        self.cmb_column.setMinimumWidth(160)
+        self.cmb_column.setToolTip("Column to search in")
+        self.cmb_column.currentIndexChanged.connect(self._on_column_changed)
+        header.addWidget(self.cmb_column)
+
         self.search_input = QLineEdit()
-        self.search_input.setPlaceholderText("Search AR no., customer, product code or color...")
-        self.search_input.setMinimumWidth(360)
+        self.search_input.setPlaceholderText("Type to search...")
+        self.search_input.setMinimumWidth(320)
         self.search_input.setClearButtonEnabled(True)
         self.search_input.returnPressed.connect(self.load_records)
+        # Searches while typing, once the user pauses
+        self._search_timer = finished_typing(self.search_input, self.load_records, delay=400)
         header.addWidget(self.search_input)
 
         btn_search = QPushButton(" Search", icon=_icon("fa5s.search", "white"))
@@ -207,18 +227,21 @@ class ARRecordsTab(QWidget):
         return val
 
     # ── Data ──────────────────────────────────────────────────────────────
+    def _on_column_changed(self, *_):
+        if self.search_input.text().strip():
+            self.load_records()
+
     def load_records(self):
+        self._search_timer.stop()   # a pending typing-pause search is now redundant
         try:
-            rows = get_records(self.search_input.text().strip(), ROW_LIMIT)
+            rows = get_records(self.search_input.text().strip(), self.cmb_column.currentData())
         except Exception as e:
             QMessageBox.critical(self, "Database Error", f"Could not load AR records:\n{e}")
             return
 
         self.table.clearSelection()
         self.model.set_rows(rows)
-
-        suffix = f" (showing newest {ROW_LIMIT:,})" if len(rows) >= ROW_LIMIT else ""
-        self.lbl_count.setText(f"{len(rows):,} record(s){suffix}")
+        self.lbl_count.setText(f"{len(rows):,} record(s)")
         self._on_selection_changed()
 
     # ── Selection / actions ───────────────────────────────────────────────

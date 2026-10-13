@@ -85,6 +85,18 @@ def create_table():
                         FOREIGN KEY (ar_no) REFERENCES tbl_ar01(ar_no)
                     )
                 """)
+        cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS tbl_audit_trail(
+                        id SERIAL PRIMARY KEY,
+                        timestamp TIMESTAMP,
+                        user_id INT,
+                        action_type VARCHAR(32),
+                        details TEXT,
+                        mac_id INT,
+                        FOREIGN KEY (user_id) REFERENCES tbl_user(user_id),
+                        FOREIGN KEY (mac_id) REFERENCES tbl_mac_address(id)
+                    )
+                """)
 
         con.commit()
 

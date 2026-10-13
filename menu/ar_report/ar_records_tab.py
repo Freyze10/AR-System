@@ -6,30 +6,16 @@ from PyQt6.QtWidgets import (
     QTableView, QHeaderView, QFrame, QAbstractItemView, QMessageBox
 )
 
-from db.connection import get_connection
+from db.read.ar_report import get_records
 
 ROW_LIMIT = 5000
 
-COLUMNS = ["AR No.", "AR Date", "Customer", "Product Code", "Product Color", "Quantity / Unit"]
-
-QUERY = """
-    SELECT h.ar_no, h.ar_date, h.customer, d.prod_code, d.prod_color,
-           d.quantity, d.qty_unit, h.is_canceled
-    FROM tbl_ar01 h
-    LEFT JOIN tbl_ar02 d ON d.ar_no = h.ar_no
-    WHERE (%(q)s = ''
-           OR CAST(h.ar_no AS TEXT) ILIKE %(like)s
-           OR h.customer   ILIKE %(like)s
-           OR d.prod_code  ILIKE %(like)s
-           OR d.prod_color ILIKE %(like)s)
-    ORDER BY h.ar_no DESC, d.sequence
-    LIMIT %(limit)s
-"""
+COLUMNS = ["AR No.", "AR Date", "Customer", "Product Code", "Product Color", "Quantity / Unit", "Count"]
 
 CENTER = Qt.AlignmentFlag.AlignCenter
 RIGHT = Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
 LEFT = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
-ALIGNMENTS = [CENTER, CENTER, LEFT, LEFT, LEFT, RIGHT]
+ALIGNMENTS = [CENTER, CENTER, LEFT, LEFT, LEFT, RIGHT, CENTER]
 
 CANCELED_FG = QColor("#B91C1C")
 CANCELED_BG = QColor("#FEF2F2")
@@ -48,12 +34,13 @@ class ARTableModel(QAbstractTableModel):
 
     def set_rows(self, db_rows):
         rows = []
-        for ar_no, ar_date, customer, code, color, qty, unit, canceled in db_rows:
+        for ar_no, ar_date, customer, code, color, qty, unit, canceled, item_count in db_rows:
             date_txt = ar_date.strftime("%m/%d/%Y") if ar_date else ""
             qty_txt = ""
             if qty is not None:
                 qty_txt = f"{float(qty):,.2f}" + (f" {unit}" if unit else "")
-            texts = [str(ar_no), date_txt, customer or "", code or "", color or "", qty_txt]
+            texts = [str(ar_no), date_txt, customer or "", code or "", color or "",
+                     qty_txt, str(item_count)]
             rows.append((texts, ar_no, bool(canceled)))
 
         self.beginResetModel()
@@ -168,11 +155,12 @@ class ARRecordsTab(QWidget):
         hdr = self.table.horizontalHeader()
         hdr.setStretchLastSection(False)
         hdr.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)  # Customer
-        for col, width in {0: 100, 1: 120, 3: 220, 4: 150, 5: 160}.items():
+        for col, width in {0: 100, 1: 120, 3: 220, 4: 150, 5: 160, 6: 90}.items():
             hdr.setSectionResizeMode(col, QHeaderView.ResizeMode.Interactive)
             self.table.setColumnWidth(col, width)
 
         self.table.selectionModel().selectionChanged.connect(self._on_selection_changed)
+        # Double-click behaves like the View button
         self.table.doubleClicked.connect(lambda *_: self._emit_for_selected(self.view_requested))
         root.addWidget(self.table, 1)
 
@@ -220,21 +208,11 @@ class ARRecordsTab(QWidget):
 
     # ── Data ──────────────────────────────────────────────────────────────
     def load_records(self):
-        search = self.search_input.text().strip()
-        params = {"q": search, "like": f"%{search}%", "limit": ROW_LIMIT}
-
-        conn = None
         try:
-            conn = get_connection()
-            with conn.cursor() as cur:
-                cur.execute(QUERY, params)
-                rows = cur.fetchall()
+            rows = get_records(self.search_input.text().strip(), ROW_LIMIT)
         except Exception as e:
             QMessageBox.critical(self, "Database Error", f"Could not load AR records:\n{e}")
             return
-        finally:
-            if conn:
-                conn.close()
 
         self.table.clearSelection()
         self.model.set_rows(rows)

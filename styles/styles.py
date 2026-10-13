@@ -39,6 +39,8 @@ class AppStyles:
 
     BLUE_500 = "#3B82F6"  # Info / Action
     BLUE_600 = "#2563EB"
+    BLUE_700 = "#1D4ED8"
+    BLUE_800 = "#1E40AF"
 
     # ── Global Application Stylesheet (QSS) ────────────────────────────────────
     GLOBAL_STYLESHEET = f"""
@@ -135,6 +137,14 @@ class AppStyles:
             background: white;
         }}
 
+        /* Locked inputs (view mode / idle): grey but still easy to read */
+        QLineEdit:disabled, QComboBox:disabled, QDateEdit:disabled, QTextEdit:disabled,
+        QDoubleSpinBox:disabled, QSpinBox:disabled {{
+            background: {SLATE_100};
+            color: {SLATE_700};
+            border: 2px solid {SLATE_300};
+        }}
+
         QLineEdit:read-only, QLineEdit#ReadOnlyField {{
             background: {SLATE_100};
             color: {SLATE_600};
@@ -223,6 +233,16 @@ class AppStyles:
         QPushButton#DangerButton    {{ background: {RED_500}; color: white; border: 2px solid {RED_600}; font-weight: 600; }}
         QPushButton#DangerButton:hover  {{ background: {RED_600}; }}
 
+        /* Info Button (New) */
+        QPushButton#InfoButton {{
+            background: {BLUE_600};
+            color: white;
+            border: 2px solid {BLUE_700};
+            font-weight: 600;
+        }}
+        QPushButton#InfoButton:hover {{ background: {BLUE_700}; }}
+        QPushButton#InfoButton:pressed {{ background: {BLUE_800}; }}
+
         /* Warning Button (Update / Edit) */
         QPushButton#WarningButton {{
             background: {AMBER_500};
@@ -253,7 +273,8 @@ class AppStyles:
         /* Disabled state for every named button variant */
         QPushButton#PrimaryButton:disabled, QPushButton#SecondaryButton:disabled,
         QPushButton#SuccessButton:disabled, QPushButton#DangerButton:disabled,
-        QPushButton#WarningButton:disabled, QPushButton#DangerOutlineButton:disabled {{
+        QPushButton#InfoButton:disabled, QPushButton#WarningButton:disabled,
+        QPushButton#DangerOutlineButton:disabled {{
             background: {SLATE_100};
             color: {SLATE_400};
             border: 2px solid {SLATE_200};

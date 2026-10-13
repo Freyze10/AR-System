@@ -1,3 +1,5 @@
+import socket
+
 import qtawesome as fa
 from PyQt6.QtCore import Qt, QDate, QStringListModel, pyqtSignal
 from PyQt6.QtWidgets import (
@@ -6,11 +8,26 @@ from PyQt6.QtWidgets import (
     QMessageBox, QDateEdit, QDoubleSpinBox, QComboBox, QCompleter
 )
 
-from db.connection import get_connection
+from db.read.ar_report import get_customers, get_next_ar_no, get_receipt, get_receipt_items
+from db.write.ar_report import update_receipt, create_receipt
 
 MAX_ITEMS = 4
 UNITS = ["KG.", "PC.", "PCS.", "MGS.", "GMS.", "SET.", "SETS."]
 COLUMNS = ["Qty", "Unit", "Product Code", "Product Color", "Lot No.", "Note"]
+
+MODE_IDLE = "idle"      # nothing loaded, form locked, Save disabled
+MODE_NEW = "new"        # after New: editable, Save enabled
+MODE_VIEW = "view"      # record loaded, read only, Save disabled
+MODE_UPDATE = "update"  # record loaded, editable, Save becomes Update
+
+TITLES = {
+    MODE_IDLE: ("Acknowledgement Receipt Entry",
+                "Click New to create a receipt, or choose a record in the Record tab to view or update it"),
+    MODE_NEW: ("New Acknowledgement Receipt",
+               f"Enter the customer details, then add up to {MAX_ITEMS} items to the receipt"),
+    MODE_VIEW: ("View Acknowledgement Receipt", "Read only. Click New to create another receipt"),
+    MODE_UPDATE: ("Update Acknowledgement Receipt", "Change the details below, then click Update to save"),
+}
 
 
 def _icon(name, color, active=None):
@@ -18,7 +35,7 @@ def _icon(name, color, active=None):
 
 
 class AREntryTab(QWidget):
-    """AR Entry: customer info + up to 4 item lines, saved to tbl_ar01 / tbl_ar02."""
+    """AR Entry: customer info + up to 4 item lines. Modes: idle / new / view / update."""
 
     saved = pyqtSignal(int)        # ar_no
     close_requested = pyqtSignal()
@@ -26,6 +43,12 @@ class AREntryTab(QWidget):
     def __init__(self, username="Brant"):
         super().__init__()
         self.username = username
+        self.hostname = socket.gethostname()
+        self.mode = MODE_IDLE
+        self._current_ar_no = None
+        self._loaded_snapshot = None
+        self._filling = False        # True while fields are set by code, not by the user
+        self._item_dirty = False     # True when the user edited the item fields
         self.customer_model = QStringListModel(self)
         self._build_ui()
         self.reset_form()
@@ -37,15 +60,14 @@ class AREntryTab(QWidget):
         root.setSpacing(16)
 
         # Heading
-        title = QLabel("New Acknowledgement Receipt")
-        title.setObjectName("HeadingTitle")
-        subtitle = QLabel("Enter the customer details, then add up to "
-                          f"{MAX_ITEMS} items to the receipt")
-        subtitle.setObjectName("SubtitleLabel")
+        self.lbl_title = QLabel("")
+        self.lbl_title.setObjectName("HeadingTitle")
+        self.lbl_subtitle = QLabel("")
+        self.lbl_subtitle.setObjectName("SubtitleLabel")
         head = QVBoxLayout()
         head.setSpacing(2)
-        head.addWidget(title)
-        head.addWidget(subtitle)
+        head.addWidget(self.lbl_title)
+        head.addWidget(self.lbl_subtitle)
         root.addLayout(head)
 
         # Top row: customer info + summary
@@ -81,10 +103,10 @@ class AREntryTab(QWidget):
         srow.setSpacing(24)
         self.lbl_count = QLabel("0 / 4")
         self.lbl_count.setObjectName("CounterValue")
-        lbl_by = QLabel(f"MBPI-IT\\{self.username}")
-        lbl_by.setObjectName("InfoValue")
+        self.lbl_by = QLabel("")
+        self.lbl_by.setObjectName("InfoValue")
         srow.addLayout(self._field("No. of Items", self.lbl_count))
-        srow.addLayout(self._field("Prepared By", lbl_by))
+        srow.addLayout(self._field("Prepared By", self.lbl_by))
         srow.addStretch(1)
         sum_body.addLayout(srow)
         top.addWidget(sum_card, 1)
@@ -169,30 +191,33 @@ class AREntryTab(QWidget):
         footer.setSpacing(8)
         footer.addStretch(1)
 
-        btn_save = QPushButton(" Save", icon=_icon("fa5s.save", "white"))
-        btn_save.setObjectName("SuccessButton")
-        btn_save.clicked.connect(self.save)
+        self.btn_new = QPushButton(" New", icon=_icon("fa5s.file-alt", "white"))
+        self.btn_new.setObjectName("InfoButton")
+        self.btn_new.clicked.connect(self.new_receipt)
 
-        btn_new = QPushButton(" New", icon=_icon("fa5s.file-alt", "#334155"))
-        btn_new.clicked.connect(self.new_receipt)
+        self.btn_save = QPushButton(" Save", icon=_icon("fa5s.save", "white"))
+        self.btn_save.setObjectName("SuccessButton")
+        self.btn_save.clicked.connect(self.save)
 
         btn_close = QPushButton(" Back", icon=_icon("ri.arrow-go-back-line", "#EF4444", "white"))
         btn_close.setObjectName("DangerOutlineButton")
         btn_close.clicked.connect(self.close_tab)
 
-        for b in (btn_save, btn_new, btn_close):
+        for b in (self.btn_new, self.btn_save, btn_close):
             footer.addWidget(b)
         root.addLayout(footer)
 
+        # Widgets that are locked outside New / Update mode
+        self._inputs = [self.txt_customer, self.date_ar, self.spin_qty, self.cmb_unit,
+                        self.txt_code, self.txt_color, self.txt_lot, self.txt_note]
+
         # Live validation / state
-        refresh = lambda *_: self._refresh_state()
-        self.spin_qty.valueChanged.connect(refresh)
-        self.cmb_unit.currentIndexChanged.connect(refresh)
-        self.txt_code.textChanged.connect(refresh)
-        self.txt_color.textChanged.connect(refresh)
-        self.table.itemSelectionChanged.connect(refresh)
+        self.spin_qty.valueChanged.connect(self._on_field_changed)
+        self.cmb_unit.currentIndexChanged.connect(self._on_field_changed)
         for w in (self.txt_code, self.txt_color, self.txt_lot, self.txt_note):
+            w.textChanged.connect(self._on_field_changed)
             w.returnPressed.connect(self.add_item)
+        self.table.itemSelectionChanged.connect(self._on_row_selected)
 
     def _card(self, title):
         frame = QFrame()
@@ -216,26 +241,68 @@ class AREntryTab(QWidget):
         box.addWidget(widget)
         return box
 
-    # ── State ─────────────────────────────────────────────────────────────
+    # ── Mode / state ──────────────────────────────────────────────────────
+    def _me(self):
+        return f"{self.hostname}\\{self.username}"
+
+    def _set_mode(self, mode):
+        self.mode = mode
+        editable = mode in (MODE_NEW, MODE_UPDATE)
+        for w in self._inputs:
+            w.setEnabled(editable)
+
+        title, subtitle = TITLES[mode]
+        if mode in (MODE_VIEW, MODE_UPDATE) and self._current_ar_no is not None:
+            title += f"  {self._current_ar_no:07d}"
+        self.lbl_title.setText(title)
+        self.lbl_subtitle.setText(subtitle)
+        self.btn_save.setText(" Update" if mode == MODE_UPDATE else " Save")
+        self._refresh_state()
+
+    def _fields_valid(self):
+        return (self.spin_qty.value() > 0
+                and bool(self.cmb_unit.currentText())
+                and bool(self.txt_code.text().strip())
+                and bool(self.txt_color.text().strip()))
+
     def _refresh_state(self):
         n = self.table.rowCount()
+        editable = self.mode in (MODE_NEW, MODE_UPDATE)
         full = n >= MAX_ITEMS
-        valid = (self.spin_qty.value() > 0
-                 and bool(self.cmb_unit.currentText())
-                 and bool(self.txt_code.text().strip())
-                 and bool(self.txt_color.text().strip()))
 
         self.lbl_count.setText(f"{n} / {MAX_ITEMS}")
-        self.btn_add.setEnabled(valid and not full)
-        self.btn_remove.setEnabled(bool(self.table.selectedItems()))
-        self.btn_clear.setEnabled(n > 0)
-        self.lbl_hint.setText(
-            f"Maximum of {MAX_ITEMS} items per receipt reached."
-            if full else "Quantity, unit, product code and product color are required to add an item."
-        )
+        self.btn_add.setEnabled(editable and self._fields_valid() and not full)
+        self.btn_remove.setEnabled(editable and self._selected_row() is not None)
+        self.btn_clear.setEnabled(editable and n > 0)
+        self.btn_save.setEnabled(editable)
+
+        if self.mode == MODE_IDLE:
+            hint = "Click New to start a receipt."
+        elif self.mode == MODE_VIEW:
+            hint = "Viewing only. Select an item row to see its details."
+        elif full:
+            hint = f"Maximum of {MAX_ITEMS} items per receipt reached."
+        else:
+            hint = "Quantity, unit, product code and product color are required to add an item."
+        self.lbl_hint.setText(hint)
+
+    def _on_field_changed(self, *_):
+        if not self._filling:
+            self._item_dirty = True
+        self._refresh_state()
+
+    def _snapshot(self):
+        items = tuple(
+            tuple(self.table.item(r, c).text() for c in range(len(COLUMNS)))
+            for r in range(self.table.rowCount()))
+        return (self.txt_customer.text().strip().upper(), self.date_ar.date().toPyDate(), items)
 
     def has_unsaved(self):
-        return bool(self.txt_customer.text().strip() or self.table.rowCount())
+        if self.mode == MODE_NEW:
+            return bool(self.txt_customer.text().strip() or self.table.rowCount())
+        if self.mode == MODE_UPDATE:
+            return self._snapshot() != self._loaded_snapshot
+        return False
 
     def _confirm(self, title, text):
         return QMessageBox.question(
@@ -244,23 +311,49 @@ class AREntryTab(QWidget):
             QMessageBox.StandardButton.No
         ) == QMessageBox.StandardButton.Yes
 
-    # ── Items ─────────────────────────────────────────────────────────────
-    def add_item(self):
-        if not self.btn_add.isEnabled():
-            return
+    # ── Item fields / table ───────────────────────────────────────────────
+    def _set_fields(self, qty=0.0, unit=None, code="", color="", lot="", note=""):
+        """Set the item fields from code (not user edits). Empty call = clear."""
+        self._filling = True
+        try:
+            self.spin_qty.setValue(qty)
+            if unit:
+                idx = self.cmb_unit.findText(unit)
+                if idx < 0:
+                    self.cmb_unit.addItem(unit)
+                    idx = self.cmb_unit.count() - 1
+                self.cmb_unit.setCurrentIndex(idx)
+            self.txt_code.setText(code)
+            self.txt_color.setText(color)
+            self.txt_lot.setText(lot)
+            self.txt_note.setText(note)
+        finally:
+            self._filling = False
+        self._item_dirty = False
+        self._refresh_state()
 
-        qty = self.spin_qty.value()
-        values = [
-            f"{qty:,.3f}",
-            self.cmb_unit.currentText(),
-            self.txt_code.text().strip().upper(),
-            self.txt_color.text().strip().upper(),
-            self.txt_lot.text().strip(),
-            self.txt_note.text().strip(),
-        ]
+    def _selected_row(self):
+        items = self.table.selectedItems()
+        return items[0].row() if items else None
 
+    def _on_row_selected(self):
+        row = self._selected_row()
+        if row is not None:
+            self._set_fields(
+                self.table.item(row, 0).data(Qt.ItemDataRole.UserRole) or 0.0,
+                self.table.item(row, 1).text(),
+                self.table.item(row, 2).text(),
+                self.table.item(row, 3).text(),
+                self.table.item(row, 4).text(),
+                self.table.item(row, 5).text(),
+            )
+        else:
+            self._refresh_state()
+
+    def _append_row(self, qty, unit, code, color, lot, note):
         r = self.table.rowCount()
         self.table.insertRow(r)
+        values = [f"{qty:,.3f}", unit, code, color, lot, note]
         for c, text in enumerate(values):
             item = QTableWidgetItem(text)
             if c == 0:
@@ -270,62 +363,99 @@ class AREntryTab(QWidget):
                 item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             self.table.setItem(r, c, item)
 
-        self._clear_item_fields()
+    def add_item(self):
+        if not self.btn_add.isEnabled():
+            return
+
+        self._append_row(
+            self.spin_qty.value(),
+            self.cmb_unit.currentText(),
+            self.txt_code.text().strip().upper(),
+            self.txt_color.text().strip().upper(),
+            self.txt_lot.text().strip(),
+            self.txt_note.text().strip(),
+        )
+        self.table.clearSelection()
+        self._set_fields()
         self.spin_qty.setFocus()
         self.spin_qty.selectAll()
-        self._refresh_state()
 
     def remove_item(self):
-        row = self.table.currentRow()
-        if row >= 0 and self.table.selectedItems():
-            self.table.removeRow(row)
-            self._refresh_state()
+        row = self._selected_row()
+        if row is None:
+            return
+        self.table.removeRow(row)   # the fields keep the removed item's values for re-editing
+        self.table.clearSelection()
+        self._refresh_state()
 
     def clear_items(self):
         if self.table.rowCount() and not self._confirm(
                 "Clear Items", "Remove all items from this receipt?"):
             return
         self.table.setRowCount(0)
-        self._clear_item_fields()
-        self._refresh_state()
-
-    def _clear_item_fields(self):
-        self.spin_qty.setValue(0)
-        for w in (self.txt_code, self.txt_color, self.txt_lot, self.txt_note):
-            w.clear()
+        self._set_fields()
 
     # ── Data ──────────────────────────────────────────────────────────────
-    def _query_scalar_list(self, sql):
-        conn = None
-        try:
-            conn = get_connection()
-            with conn.cursor() as cur:
-                cur.execute(sql)
-                return [r[0] for r in cur.fetchall()]
-        except Exception:
-            return []
-        finally:
-            if conn:
-                conn.close()
-
     def refresh_ar_number(self):
-        res = self._query_scalar_list("SELECT COALESCE(MAX(ar_no), 0) + 1 FROM tbl_ar01")
-        self.txt_ar_no.setText(f"{int(res[0]):07d}" if res else "—")
+        if self.mode != MODE_NEW:
+            return
+        try:
+            self.txt_ar_no.setText(f"{int(get_next_ar_no()):07d}")
+        except Exception:
+            self.txt_ar_no.setText("—")
 
     def _load_customers(self):
-        self.customer_model.setStringList(self._query_scalar_list(
-            "SELECT DISTINCT customer FROM tbl_ar01 WHERE customer <> '' ORDER BY customer"))
+        try:
+            self.customer_model.setStringList(get_customers())
+        except Exception:
+            self.customer_model.setStringList([])
+
+    def load_record(self, ar_no, mode):
+        """Open an existing receipt in MODE_VIEW or MODE_UPDATE. Returns True when loaded."""
+        if self.has_unsaved() and not self._confirm(
+                "Discard Changes", "Discard the receipt currently being entered?"):
+            return False
+
+        try:
+            header = get_receipt(ar_no)
+            items = get_receipt_items(ar_no)
+        except Exception as e:
+            QMessageBox.critical(self, "Database Error", f"Could not load receipt {ar_no}:\n{e}")
+            return False
+        if not header:
+            QMessageBox.warning(self, "Not Found", f"Receipt {ar_no} no longer exists.")
+            return False
+
+        _, ar_date, customer, encoded_by = header
+        self._clear_all()
+        self._load_customers()
+        self.txt_customer.setText(customer or "")
+        if ar_date:
+            self.date_ar.setDate(QDate(ar_date.year, ar_date.month, ar_date.day))
+        self.txt_ar_no.setText(f"{ar_no:07d}")
+        self.lbl_by.setText(encoded_by or "—")
+
+        for qty, unit, code, color, lot, note in items:
+            self._append_row(float(qty or 0), unit or "", code or "", color or "", lot or "", note or "")
+
+        self._current_ar_no = ar_no
+        self._loaded_snapshot = self._snapshot()
+        self._set_mode(mode)
+        return True
 
     def save(self):
+        if self.mode not in (MODE_NEW, MODE_UPDATE):
+            return
+
         customer = self.txt_customer.text().strip().upper()
         if not customer:
             QMessageBox.warning(self, "Missing Customer", "Please enter the customer name.")
             self.txt_customer.setFocus()
             return
-        if self.btn_add.isEnabled():
+        if self._item_dirty and self._fields_valid():
             QMessageBox.warning(self, "Item Not Added",
                                 "The item in the form hasn't been added yet.\n"
-                                "Click Add to include it, or clear the fields first.")
+                                "Click Add to include it, or clear the item fields.")
             return
         if self.table.rowCount() == 0:
             QMessageBox.warning(self, "No Items", "Add at least one item before saving.")
@@ -347,63 +477,65 @@ class AREntryTab(QWidget):
             "ar_date": self.date_ar.date().toPyDate(),
             "customer": customer[:128],
             "t_items": len(items),
-            "encoded_by": self.username[:128],
+            "user": self.username[:128],
         }
 
-        conn = None
+        updating = self.mode == MODE_UPDATE
         try:
-            conn = get_connection()
-            conn.autocommit = False
-            with conn.cursor() as cur:
-                cur.execute("""
-                    INSERT INTO tbl_ar01 (ar_no, ar_date, customer, t_items, encoded_by,
-                                          encoded_on, is_canceled, is_printed)
-                    SELECT COALESCE(MAX(ar_no), 0) + 1, %(ar_date)s::date, %(customer)s::varchar,
-                           %(t_items)s::int, %(encoded_by)s::varchar, NOW(), FALSE, FALSE
-                    FROM tbl_ar01
-                    RETURNING ar_no
-                """, header)
-                ar_no = cur.fetchone()[0]
-
-                cur.executemany("""
-                    INSERT INTO tbl_ar02 (ar_no, quantity, qty_unit, sequence,
-                                          prod_code, prod_color, lot_no, notes)
-                    VALUES (%(ar_no)s, %(quantity)s, %(qty_unit)s, %(sequence)s,
-                            %(prod_code)s, %(prod_color)s, %(lot_no)s, %(notes)s)
-                """, [dict(i, ar_no=ar_no) for i in items])
-            conn.commit()
+            if updating:
+                ar_no = self._current_ar_no
+                update_receipt(ar_no, header, items)
+            else:
+                ar_no = create_receipt(header, items)
         except Exception as e:
-            if conn:
-                conn.rollback()
             QMessageBox.critical(self, "Save Failed", f"Could not save the receipt:\n{e}")
             return
-        finally:
-            if conn:
-                conn.close()
 
-        QMessageBox.information(self, "Saved", f"Acknowledgement Receipt {ar_no:07d} saved.")
+        QMessageBox.information(
+            self, "Saved",
+            f"Acknowledgement Receipt {ar_no:07d} {'updated' if updating else 'saved'}.")
         self.saved.emit(ar_no)
         self.reset_form()
+        if updating:
+            self.close_requested.emit()   # back to the Record tab
 
     # ── Form lifecycle ────────────────────────────────────────────────────
-    def reset_form(self):
+    def _clear_all(self):
         self.txt_customer.clear()
         self.date_ar.setDate(QDate.currentDate())
         self.table.setRowCount(0)
-        self._clear_item_fields()
-        self.cmb_unit.setCurrentIndex(0)
-        self._load_customers()
-        self.refresh_ar_number()
-        self._refresh_state()
-        self.txt_customer.setFocus()
+        self._filling = True
+        try:
+            self.cmb_unit.clear()
+            self.cmb_unit.addItems(UNITS)
+        finally:
+            self._filling = False
+        self._set_fields()
+        self.lbl_by.setText(self._me())
+
+    def reset_form(self):
+        """Back to the idle, locked state."""
+        self._clear_all()
+        self._current_ar_no = None
+        self._loaded_snapshot = None
+        self.txt_ar_no.setText("—")
+        self._set_mode(MODE_IDLE)
 
     def new_receipt(self):
-        if not self.has_unsaved() or self._confirm(
+        if self.has_unsaved() and not self._confirm(
                 "New Receipt", "Discard the receipt currently being entered?"):
-            self.reset_form()
+            return
+        self._clear_all()
+        self._current_ar_no = None
+        self._loaded_snapshot = None
+        self._load_customers()
+        self._set_mode(MODE_NEW)
+        self.refresh_ar_number()
+        self.txt_customer.setFocus()
 
     def close_tab(self):
-        if not self.has_unsaved() or self._confirm(
-                "Close Entry", "Discard the receipt currently being entered?"):
-            self.reset_form()
-            self.close_requested.emit()
+        if self.has_unsaved() and not self._confirm(
+                "Back", "Discard the receipt currently being entered?"):
+            return
+        self.reset_form()
+        self.close_requested.emit()

@@ -3,15 +3,15 @@ from PyQt6.QtCore import pyqtSignal
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QTabWidget
 
 from menu.ar_report.ar_records_tab import ARRecordsTab
-from menu.ar_report.ar_entry_tab import AREntryTab
+from menu.ar_report.ar_entry_tab import AREntryTab, MODE_VIEW, MODE_UPDATE
 
 
 class AcknowledgementReceiptWidget(QWidget):
-    """AR module: Tab 1 = record browser, Tab 2 = receipt entry."""
+    """AR module: Tab 1 = record browser, Tab 2 = receipt entry / view / update."""
 
     close_requested = pyqtSignal()
 
-    def __init__(self, username="Brant"):
+    def __init__(self, username="User"):
         super().__init__()
         self.records_tab = ARRecordsTab()
         self.entry_tab = AREntryTab(username)
@@ -28,10 +28,16 @@ class AcknowledgementReceiptWidget(QWidget):
         layout.addWidget(self.tabs)
 
         # Wiring
+        self.records_tab.view_requested.connect(lambda ar_no: self._open_record(ar_no, MODE_VIEW))
+        self.records_tab.update_requested.connect(lambda ar_no: self._open_record(ar_no, MODE_UPDATE))
+        self.records_tab.close_requested.connect(self.close_requested)
         self.entry_tab.saved.connect(lambda _ar_no: self.records_tab.load_records())
         self.entry_tab.close_requested.connect(lambda: self.tabs.setCurrentWidget(self.records_tab))
-        self.records_tab.close_requested.connect(self.close_requested)
         self.tabs.currentChanged.connect(self._on_tab_changed)
+
+    def _open_record(self, ar_no, mode):
+        if self.entry_tab.load_record(ar_no, mode):
+            self.tabs.setCurrentWidget(self.entry_tab)
 
     def _on_tab_changed(self, index):
         if self.tabs.widget(index) is self.entry_tab:

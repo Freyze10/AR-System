@@ -13,6 +13,7 @@ from db.write.ar_report import update_receipt, create_receipt
 from db.write.audit_trail import log_action
 from menu.ar_report.ar_audit import (describe_save, describe_update,
                                      normalize_item, workstation_mac)
+from print.print_ar import ARPrintPreview, build_print_data
 
 MAX_ITEMS = 4
 UNITS = ["KG.", "PC.", "PCS.", "MGS.", "GMS.", "SET.", "SETS."]
@@ -22,6 +23,8 @@ MODE_IDLE = "idle"      # nothing loaded, form locked, Save disabled
 MODE_NEW = "new"        # after New: editable, Save enabled
 MODE_VIEW = "view"      # record loaded, read only, Save disabled
 MODE_UPDATE = "update"  # record loaded, editable, Save becomes Update
+
+PRINT_MODES = (MODE_VIEW,)   # modes in which the Print button is enabled
 
 TITLES = {
     MODE_IDLE: ("Acknowledgement Receipt Entry",
@@ -195,6 +198,10 @@ class AREntryTab(QWidget):
         footer.setSpacing(8)
         footer.addStretch(1)
 
+        self.btn_print = QPushButton(" Print", icon=_icon("fa5s.print", "white"))
+        self.btn_print.setObjectName("SecondaryButton")
+        self.btn_print.clicked.connect(self.print_receipt)
+
         self.btn_new = QPushButton(" New", icon=_icon("fa5s.file-alt", "white"))
         self.btn_new.setObjectName("InfoButton")
         self.btn_new.clicked.connect(self.new_receipt)
@@ -207,7 +214,7 @@ class AREntryTab(QWidget):
         btn_close.setObjectName("DangerOutlineButton")
         btn_close.clicked.connect(self.close_tab)
 
-        for b in (self.btn_new, self.btn_save, btn_close):
+        for b in (self.btn_print, self.btn_new, self.btn_save, btn_close):
             footer.addWidget(b)
         root.addLayout(footer)
 
@@ -284,6 +291,8 @@ class AREntryTab(QWidget):
         self.btn_remove.setEnabled(editable and self._selected_row() is not None)
         self.btn_clear.setEnabled(editable and n > 0)
         self.btn_save.setEnabled(editable)
+        self.btn_print.setEnabled(
+            self.mode in PRINT_MODES and self._current_ar_no is not None and n > 0)
 
         if self.mode == MODE_IDLE:
             hint = "Click New to start a receipt."
@@ -518,6 +527,26 @@ class AREntryTab(QWidget):
         self.reset_form()
         if updating:
             self.close_requested.emit()   # back to the Record tab
+
+    # ── Printing ──────────────────────────────────────────────────────────
+    def print_receipt(self):
+        """Open the print preview for the receipt shown in the form."""
+        if self.mode not in PRINT_MODES or self._current_ar_no is None:
+            return
+
+        rows = [
+            (self.table.item(r, 0).data(Qt.ItemDataRole.UserRole),
+             *(self.table.item(r, c).text() for c in range(1, 6)))
+            for r in range(self.table.rowCount())
+        ]
+        data = build_print_data(
+            ar_no=self._current_ar_no,
+            ar_date=self.date_ar.date().toPyDate(),
+            customer=self.txt_customer.text(),
+            prepared_by=self.lbl_by.text(),
+            items=rows,
+        )
+        ARPrintPreview(data, parent=self.window()).show()
 
     # ── Form lifecycle ────────────────────────────────────────────────────
     def _clear_all(self):

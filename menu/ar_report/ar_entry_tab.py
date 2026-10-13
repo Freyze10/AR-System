@@ -176,7 +176,7 @@ class AREntryTab(QWidget):
         btn_new = QPushButton(" New", icon=_icon("fa5s.file-alt", "#334155"))
         btn_new.clicked.connect(self.new_receipt)
 
-        btn_close = QPushButton(" Close", icon=_icon("fa5s.times", "#EF4444", "white"))
+        btn_close = QPushButton(" Back", icon=_icon("ri.arrow-go-back-line", "#EF4444", "white"))
         btn_close.setObjectName("DangerOutlineButton")
         btn_close.clicked.connect(self.close_tab)
 

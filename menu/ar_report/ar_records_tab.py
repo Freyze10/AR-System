@@ -196,7 +196,7 @@ class ARRecordsTab(QWidget):
         btn_refresh.setObjectName("PrimaryButton")
         btn_refresh.clicked.connect(self.load_records)
 
-        btn_close = QPushButton(" Close", icon=_icon("fa5s.times", "#DC2626", "white"))
+        btn_close = QPushButton(" Back", icon=_icon("ri.arrow-go-back-line", "#DC2626", "white"))
         btn_close.setObjectName("DangerOutlineButton")
         btn_close.clicked.connect(self.close_requested.emit)
 

@@ -10,6 +10,9 @@ from PyQt6.QtWidgets import (
 
 from db.read.ar_report import get_customers, get_next_ar_no, get_receipt, get_receipt_items
 from db.write.ar_report import update_receipt, create_receipt
+from db.write.audit_trail import log_action
+from menu.ar_report.ar_audit import (describe_save, describe_update,
+                                     normalize_item, workstation_mac)
 
 MAX_ITEMS = 4
 UNITS = ["KG.", "PC.", "PCS.", "MGS.", "GMS.", "SET.", "SETS."]
@@ -47,6 +50,7 @@ class AREntryTab(QWidget):
         self.mode = MODE_IDLE
         self._current_ar_no = None
         self._loaded_snapshot = None
+        self._loaded = None
         self._filling = False        # True while fields are set by code, not by the user
         self._item_dirty = False     # True when the user edited the item fields
         self.customer_model = QStringListModel(self)
@@ -240,6 +244,11 @@ class AREntryTab(QWidget):
         box.addWidget(lbl)
         box.addWidget(widget)
         return box
+
+    def _items_from_table(self):
+        return [normalize_item(self.table.item(r, 0).data(Qt.ItemDataRole.UserRole),
+                               *(self.table.item(r, c).text() for c in range(1, 6)))
+                for r in range(self.table.rowCount())]
 
     # ── Mode / state ──────────────────────────────────────────────────────
     def _me(self):
@@ -440,6 +449,8 @@ class AREntryTab(QWidget):
 
         self._current_ar_no = ar_no
         self._loaded_snapshot = self._snapshot()
+        self._loaded = {"customer": customer or "", "ar_date": ar_date,
+                        "items": self._items_from_table()}
         self._set_mode(mode)
         return True
 
@@ -490,6 +501,15 @@ class AREntryTab(QWidget):
         except Exception as e:
             QMessageBox.critical(self, "Save Failed", f"Could not save the receipt:\n{e}")
             return
+
+        if updating:
+            new = {"customer": header["customer"], "ar_date": header["ar_date"],
+                   "items": self._items_from_table()}
+            log_action("UPDATED", describe_update(ar_no, self._loaded, new),
+                       username=self.username, mac_address=workstation_mac())
+        else:
+            log_action("SAVED", describe_save(ar_no, header["customer"], len(items)),
+                       username=self.username, mac_address=workstation_mac())
 
         QMessageBox.information(
             self, "Saved",

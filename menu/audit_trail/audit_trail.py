@@ -131,6 +131,7 @@ class AuditTrailWidget(QWidget):
         self.date_to = QDateEdit(QDate.currentDate())
         self.date_to.setCalendarPopup(True)
         self.date_to.setDisplayFormat("MM/dd/yyyy")
+        self._auto_to = self.date_to.date()
 
         row.addLayout(self._field("Search In", self.cmb_column), 1)
         row.addLayout(self._field("Search", self.txt_search), 3)
@@ -231,6 +232,19 @@ class AuditTrailWidget(QWidget):
 
     def table_resize_rows(self):
         self.table.resizeRowsToContents()
+
+    def _roll_dates(self):
+        """If the app stays open past midnight, move the default 'To' date to today."""
+        today = QDate.currentDate()
+        if self.date_to.date() == self._auto_to and self._auto_to != today:
+            self.date_to.blockSignals(True)
+            self.date_to.setDate(today)
+            self.date_to.blockSignals(False)
+            self._auto_to = today
+
+    def refresh(self):
+        self._roll_dates()
+        self.load_records()
 
     # ── Data ──────────────────────────────────────────────────────────────
     def showEvent(self, event):

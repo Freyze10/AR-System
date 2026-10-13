@@ -10,6 +10,7 @@ from PyQt6.QtWidgets import (
     QLabel, QFrame, QPushButton, QStackedWidget, QStatusBar, QMessageBox
 )
 
+from menu.audit_trail.audit_trail import AuditTrailWidget
 from styles.styles import AppStyles
 from menu.ar_report.ar_report import AcknowledgementReceiptWidget
 from menu.user_management.user_management import UserManagementWidget
@@ -50,7 +51,7 @@ class MainWindow(QMainWindow):
         self.ar_widget = AcknowledgementReceiptWidget(username=self.username)
         self.ar_widget.close_requested.connect(self.close)
         self.stacked_widget.addWidget(self.ar_widget)   # Index 0: AR Record / Entry tabs
-        self.stacked_widget.addWidget(QWidget())        # Index 1: Audit Trail Placeholder
+        self.stacked_widget.addWidget(AuditTrailWidget())  # Index 1: Audit Trail Placeholder
         if self.is_admin:
             self.stacked_widget.addWidget(UserManagementWidget())  # Index 2: User Management
 

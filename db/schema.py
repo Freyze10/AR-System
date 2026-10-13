@@ -53,50 +53,54 @@ def create_table():
             )
         """)
 
-        # 4. Tbl ar_report
         cursor.execute("""
-                    CREATE TABLE IF NOT EXISTS tbl_ar01(
-                        id SERIAL PRIMARY KEY,
-                        ar_no INT NOT NULL UNIQUE,
-                        ar_date date,
-                        t_items INT,
-                        customer VARCHAR(128),
-                        encoded_by VARCHAR(128),
-                        updated_by VARCHAR(128),
-                        encoded_on TIMESTAMP, 
-                        updated_on TIMESTAMP, 
-                        user_id INT UNIQUE,
-                        is_canceled boolean,
-                        is_printed boolean,
-                        FOREIGN KEY (user_id) REFERENCES tbl_user(user_id)
-                    )
-                """)
+            CREATE TABLE IF NOT EXISTS tbl_ar01(
+                id SERIAL PRIMARY KEY,
+                ar_no INT NOT NULL UNIQUE,
+                ar_date date,
+                t_items INT,
+                customer VARCHAR(128),
+                encoded_by VARCHAR(128),
+                updated_by VARCHAR(128),
+                encoded_on TIMESTAMP, 
+                updated_on TIMESTAMP, 
+                user_id INT,
+                is_canceled boolean,
+                is_printed boolean,
+                FOREIGN KEY (user_id) REFERENCES tbl_user(user_id)
+            )
+        """)
+
         cursor.execute("""
-                    CREATE TABLE IF NOT EXISTS tbl_ar02(
-                        id SERIAL PRIMARY KEY,
-                        ar_no INT NOT NULL,
-                        quantity DECIMAL(12,6),
-                        qty_unit VARCHAR(10),
-                        sequence INT,
-                        prod_code VARCHAR(128),
-                        prod_color VARCHAR(62),
-                        lot_no TEXT,
-                        notes TEXT, 
-                        FOREIGN KEY (ar_no) REFERENCES tbl_ar01(ar_no)
-                    )
-                """)
+            CREATE TABLE IF NOT EXISTS tbl_ar02(
+                id SERIAL PRIMARY KEY,
+                ar_no INT NOT NULL,
+                quantity DECIMAL(12,6),
+                qty_unit VARCHAR(10),
+                sequence INT,
+                prod_code VARCHAR(128),
+                prod_color VARCHAR(62),
+                lot_no TEXT,
+                notes TEXT, 
+                FOREIGN KEY (ar_no) REFERENCES tbl_ar01(ar_no)
+            )
+        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_ar02_ar_no ON tbl_ar02(ar_no);")
+
+        # 5. Audit Trail
         cursor.execute("""
-                    CREATE TABLE IF NOT EXISTS tbl_audit_trail(
-                        id SERIAL PRIMARY KEY,
-                        timestamp TIMESTAMP,
-                        user_id INT,
-                        action_type VARCHAR(32),
-                        details TEXT,
-                        mac_id INT,
-                        FOREIGN KEY (user_id) REFERENCES tbl_user(user_id),
-                        FOREIGN KEY (mac_id) REFERENCES tbl_mac_address(id)
-                    )
-                """)
+            CREATE TABLE IF NOT EXISTS tbl_audit_trail(
+                id SERIAL PRIMARY KEY,
+                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                user_id INT,
+                action_type VARCHAR(32),
+                details TEXT,
+                mac_id INT,
+                FOREIGN KEY (user_id) REFERENCES tbl_user(user_id),
+                FOREIGN KEY (mac_id) REFERENCES tbl_mac_address(id)
+            )
+        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON tbl_audit_trail(timestamp);")
 
         con.commit()
 

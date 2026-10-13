@@ -1,11 +1,13 @@
 import qtawesome as fa
 from PyQt6.QtCore import Qt, QSize
+from PyQt6.QtGui import QIcon
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QFrame, QMessageBox
 )
 
 from db.read.login import authenticate_user, has_mac_address
 from db.write.login import register_workstation
+from util.absolute_path import resource_path
 
 from workstation.workstation import get_workstation_info
 from styles.styles import AppStyles
@@ -21,6 +23,8 @@ class LoginWindow(QDialog):
 
         self.setObjectName("LoginWindow")
         self.setWindowTitle("AR-SYSTEM | Sign In")
+        icon_path = resource_path("styles/img/ar_logo.ico")
+        self.setWindowIcon(QIcon(icon_path))
         self.setFixedSize(820, 500)
         self._build_ui()
 

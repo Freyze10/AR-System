@@ -4,15 +4,17 @@ import sys
 from datetime import datetime
 import qtawesome as fa
 from PyQt6.QtCore import Qt, QSize, QTimer, pyqtSignal
+from PyQt6.QtGui import QIcon
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
     QLabel, QFrame, QPushButton, QStackedWidget, QStatusBar, QMessageBox
 )
 
-from db.schema import create_table
 from styles.styles import AppStyles
 from menu.ar_report.ar_report import AcknowledgementReceiptWidget
 from menu.user_management.user_management import UserManagementWidget
+from util.absolute_path import resource_path
+
 
 class MainWindow(QMainWindow):
     logout_requested = pyqtSignal()
@@ -24,11 +26,12 @@ class MainWindow(QMainWindow):
         self.hostname = socket.gethostname()
         self.is_admin = "ADMIN" in self.role.upper()
         self.setWindowTitle("AR_REPORT-SYSTEM-2026 | MASTERBATCH PHILIPPINES INCORPORATED")
+        icon_path = resource_path("styles/img/ar_logo.ico")
+        self.setWindowIcon(QIcon(icon_path))
         self.setGeometry(100, 100, 1300, 700)   # size used when the user restores from maximized
         self.setMinimumSize(1000, 600)
         self.init_ui()
 
-        create_table()
         self.showMaximized()                    # opens full screen, still resizable
 
     def init_ui(self):

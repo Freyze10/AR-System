@@ -206,7 +206,7 @@ class AppStyles:
 
         /* Secondary / Action Button (Slate Dark) */
         QPushButton#SecondaryButton, QPushButton.btn-secondary {{
-            background: {SLATE_700};
+            background: {SLATE_800};
             color: white;
             border: 2px solid {SLATE_900};
             font-weight: 600;
@@ -369,6 +369,56 @@ class AppStyles:
         }}
         QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
             height: 0px;
+        }}
+
+        /* ── Login Window ─────────────────────────────────────────────────── */
+        QFrame#LoginBrand {{
+            background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 {SLATE_900}, stop:1 {SLATE_800});
+            border: none;
+        }}
+        QFrame#LoginBrand QLabel {{
+            background: transparent;
+        }}
+        QLabel#LoginBrandTitle {{
+            font-size: 30px;
+            font-weight: 700;
+            color: white;
+        }}
+        QLabel#LoginBrandText {{
+            font-size: 15px;
+            color: {SLATE_300};
+        }}
+        QLabel#LoginBrandFooter {{
+            font-size: 11px;
+            font-weight: 600;
+            color: {SLATE_400};
+            letter-spacing: 0.06em;
+        }}
+
+        QFrame#LoginForm {{
+            background: white;
+            border: none;
+        }}
+        QFrame#LoginForm QLabel {{
+            background: transparent;
+        }}
+        QLabel#LoginTitle {{
+            font-size: 26px;
+            font-weight: 700;
+            color: {SLATE_900};
+        }}
+        QLineEdit#LoginInput {{
+            font-size: 15px;
+            padding: 9px 10px;
+        }}
+        QFrame#LoginForm QLabel#LoginError {{
+            background: {RED_50};
+            color: {RED_600};
+            border: 2px solid {RED_300};
+            border-radius: 8px;
+            padding: 8px 10px;
+            font-size: 13px;
+            font-weight: 600;
         }}
 
         /* ── Sidebar Component Styles ─────────────────────────────────────── */

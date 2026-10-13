@@ -1,13 +1,13 @@
 """Builds the audit trail text for AR saves and updates."""
+from workstation.workstation import get_real_mac
 
 _FIELDS = ("Quantity", "Unit", "Product Code", "Product Color", "Lot No.", "Note")
 _MIN_SIMILARITY = 2   # an old and a new item need at least this many equal, non-empty fields to count as "the same item, edited"
 
 
 def workstation_mac():
-    """Return the MAC of this PC, in the same way login registers it (db/workstation.py).
-    TODO: connect this to that helper. Until then the Workstation MAC column stays blank."""
-    return None
+    """The MAC of this PC, read the same way login registers it (db/workstation.py)."""
+    return get_real_mac()
 
 
 def normalize_item(qty, unit, code, color, lot, note):

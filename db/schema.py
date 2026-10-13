@@ -32,7 +32,7 @@ def create_table():
             CREATE TABLE IF NOT EXISTS tbl_user(
                 user_id SERIAL PRIMARY KEY,
                 role_id INT NOT NULL,
-                hostname VARCHAR(36) NOT NULL,
+                hostname VARCHAR(36),
                 ip_address VARCHAR(32),
                 username VARCHAR(50) NOT NULL,
                 password VARCHAR(36) NOT NULL, 
@@ -41,12 +41,13 @@ def create_table():
         """)
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_user_role_id ON tbl_user(role_id);")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_user_hostname ON tbl_user(hostname);")
+        cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_user_username_unique ON tbl_user (LOWER(username));")
 
         # 3. MAC Address
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS tbl_mac_address(
                 id SERIAL PRIMARY KEY,
-                mac_address VARCHAR(32),
+                mac_address VARCHAR(32) UNIQUE,
                 user_id INT UNIQUE,
                 FOREIGN KEY (user_id) REFERENCES tbl_user(user_id)
             )

@@ -11,6 +11,7 @@ from PyQt6.QtWidgets import (
 from db.schema import create_table
 from styles.styles import AppStyles
 from menu.ar_report.ar_report import AcknowledgementReceiptWidget
+from menu.user_management.user_management import UserManagementWidget
 
 class MainWindow(QMainWindow):
     logout_requested = pyqtSignal()
@@ -19,6 +20,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.username = username
         self.role = role
+        self.is_admin = "ADMIN" in self.role.upper()
         self.setWindowTitle("AR_REPORT-SYSTEM-2026 | MASTERBATCH PHILIPPINES INCORPORATED")
         self.setGeometry(100, 100, 1300, 700)
         self.showMaximized()
@@ -41,6 +43,8 @@ class MainWindow(QMainWindow):
         self.stacked_widget = QStackedWidget()
         self.stacked_widget.addWidget(AcknowledgementReceiptWidget())  # Index 0: ar_report Report
         self.stacked_widget.addWidget(QWidget())                       # Index 1: Audit Trail Placeholder
+        if self.is_admin:
+            self.stacked_widget.addWidget(UserManagementWidget())      # Index 2: User Management
 
         main_layout.addWidget(self.stacked_widget)
         self.setCentralWidget(main_widget)
@@ -88,6 +92,10 @@ class MainWindow(QMainWindow):
 
         layout.addWidget(self.btn_ar_report)
         layout.addWidget(self.btn_audit_trail)
+
+        if self.is_admin:
+            self.btn_user_mgmt = self.create_menu_button(" User Management", "fa5s.users-cog", 2)
+            layout.addWidget(self.btn_user_mgmt)
 
         # Spacer
         layout.addStretch(1)

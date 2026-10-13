@@ -1,4 +1,4 @@
-import csv
+from math import ceil
 
 import qtawesome as fa
 from PyQt6.QtCore import Qt, QAbstractTableModel, QDate, QEvent, QModelIndex, QTimer
@@ -8,7 +8,7 @@ from PyQt6.QtWidgets import (
     QFileDialog, QApplication
 )
 
-from db.read.audit_trail import SEARCH_COLUMNS, get_records
+from db.read.audit_trail import SEARCH_COLUMNS, get_date_range, get_records
 
 ROW_LIMIT = 1000
 
@@ -18,6 +18,11 @@ DETAILS_COL = 3
 MIN_DETAILS = 240
 FIXED_WIDTHS = {0: 185, 1: 170, 2: 110, 4: 115, 5: 150, 6: 150}
 
+# Excel export
+XLSX_MIN_WIDTH = 10
+XLSX_MAX_WIDTH = {DETAILS_COL: 70}     # every other column is capped at 40
+XLSX_LINE_HEIGHT = 15.0                # points per line of 11 pt text
+
 LEFT = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
 
 
@@ -25,8 +30,12 @@ def _icon(name, color, active=None):
     return fa.icon(name, color=color, color_active=active or color, color_disabled="#94A3B8")
 
 
+def _qdate(d):
+    return QDate(d.year, d.month, d.day)
+
+
 def row_texts(db_row):
-    """One database row -> list of display strings (also used by the CSV export)."""
+    """One database row -> list of display strings (also used by the Excel export)."""
     logged_at, workstation, action, details, ip, user_mac, ws_mac = db_row
     return [
         logged_at.strftime("%m/%d/%Y %I:%M:%S %p") if logged_at else "",
@@ -37,6 +46,55 @@ def row_texts(db_row):
         user_mac or "",
         ws_mac or "",
     ]
+
+
+def write_xlsx(path, db_rows):
+    """Bold, larger headers; column widths and row heights fitted to the content."""
+    from openpyxl import Workbook
+    from openpyxl.styles import Alignment, Font
+    from openpyxl.utils import get_column_letter
+
+    table = [row_texts(r) for r in db_rows]
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Audit Trail"
+
+    header_font = Font(bold=True, size=13)
+    header_align = Alignment(vertical="center", wrap_text=True)
+    body_align = Alignment(vertical="top", wrap_text=True)
+
+    for c, name in enumerate(COLUMNS, start=1):
+        cell = ws.cell(row=1, column=c, value=name)
+        cell.font = header_font
+        cell.alignment = header_align
+
+    for r, texts in enumerate(table, start=2):
+        for c, text in enumerate(texts, start=1):
+            cell = ws.cell(row=r, column=c, value=text)
+            cell.data_type = "s"            # text stays text, even if it starts with "="
+            cell.alignment = body_align
+
+    # Column widths: longest line in the column (or the header), within limits
+    widths = []
+    for c, name in enumerate(COLUMNS):
+        longest = max((len(part) for texts in table for part in texts[c].split("\n")), default=0)
+        width = max(longest, len(name) * 1.3) + 3
+        width = min(max(width, XLSX_MIN_WIDTH), XLSX_MAX_WIDTH.get(c, 40))
+        widths.append(width)
+        ws.column_dimensions[get_column_letter(c + 1)].width = width
+
+    # Row heights: number of wrapped lines in the tallest cell of the row
+    ws.row_dimensions[1].height = 26
+    for r, texts in enumerate(table, start=2):
+        lines = 1
+        for c, text in enumerate(texts):
+            per_line = max(int(widths[c]) - 2, 1)
+            n = sum(max(1, ceil(len(part) / per_line)) for part in text.split("\n"))
+            lines = max(lines, n)
+        ws.row_dimensions[r].height = min(lines * XLSX_LINE_HEIGHT + 4, 409)
+
+    ws.freeze_panes = "A2"      # header stays visible while scrolling
+    wb.save(path)
 
 
 class AuditTableModel(QAbstractTableModel):
@@ -74,7 +132,7 @@ class AuditTableModel(QAbstractTableModel):
 
 
 class AuditTrailWidget(QWidget):
-    """Audit Trail: searchable, date-filtered log with CSV export."""
+    """Audit Trail: searchable, date-filtered log with Excel export."""
 
     def __init__(self):
         super().__init__()
@@ -124,14 +182,17 @@ class AuditTrailWidget(QWidget):
         self.txt_search.setPlaceholderText("Type to search...")
         self.txt_search.setClearButtonEnabled(True)
 
-        self.date_from = QDateEdit(QDate.currentDate().addDays(-30))
+        # The real dates are set from the audit trail itself in _sync_dates()
+        self.date_from = QDateEdit(QDate.currentDate())
         self.date_from.setCalendarPopup(True)
         self.date_from.setDisplayFormat("MM/dd/yyyy")
 
         self.date_to = QDateEdit(QDate.currentDate())
         self.date_to.setCalendarPopup(True)
         self.date_to.setDisplayFormat("MM/dd/yyyy")
-        self._auto_to = self.date_to.date()
+
+        self._auto_from = None      # the date _sync_dates last put in each field,
+        self._auto_to = None        # so a date picked by hand can be told apart
 
         row.addLayout(self._field("Search In", self.cmb_column), 1)
         row.addLayout(self._field("Search", self.txt_search), 3)
@@ -184,11 +245,11 @@ class AuditTrailWidget(QWidget):
 
         self.btn_export = QPushButton(" Export", icon=_icon("fa5s.download", "white"))
         self.btn_export.setObjectName("SecondaryButton")
-        self.btn_export.clicked.connect(self.export_csv)
+        self.btn_export.clicked.connect(self.export_excel)
 
         btn_refresh = QPushButton(" Refresh", icon=_icon("fa5s.sync-alt", "white"))
         btn_refresh.setObjectName("PrimaryButton")
-        btn_refresh.clicked.connect(lambda: self.load_records())
+        btn_refresh.clicked.connect(self.refresh)
 
         footer.addWidget(self.btn_export)
         footer.addWidget(btn_refresh)
@@ -233,23 +294,40 @@ class AuditTrailWidget(QWidget):
     def table_resize_rows(self):
         self.table.resizeRowsToContents()
 
-    def _roll_dates(self):
-        """If the app stays open past midnight, move the default 'To' date to today."""
+    # ── Dates ─────────────────────────────────────────────────────────────
+    def _sync_dates(self):
+        """From / To follow the first and last day in the audit trail, and the
+        calendars only allow days inside that range. A date the user picked by
+        hand is kept (as long as it is still inside the range)."""
+        try:
+            first, last = get_date_range()
+        except Exception:
+            return      # load_records will show the database error
+
         today = QDate.currentDate()
-        if self.date_to.date() == self._auto_to and self._auto_to != today:
-            self.date_to.blockSignals(True)
-            self.date_to.setDate(today)
-            self.date_to.blockSignals(False)
-            self._auto_to = today
+        low = _qdate(first) if first else today
+        high = _qdate(last) if last else today
+
+        for edit, attr, value in ((self.date_from, "_auto_from", low),
+                                  (self.date_to, "_auto_to", high)):
+            auto = getattr(self, attr)
+            follow = auto is None or edit.date() == auto    # not changed by the user
+            edit.blockSignals(True)
+            edit.setDateRange(low, high)
+            if follow:
+                edit.setDate(value)
+            edit.blockSignals(False)
+            setattr(self, attr, value)
 
     def refresh(self):
-        self._roll_dates()
+        self._sync_dates()
         self.load_records()
 
     # ── Data ──────────────────────────────────────────────────────────────
     def showEvent(self, event):
         super().showEvent(event)
         if not event.spontaneous():     # shown by navigation, not by minimize/restore
+            self._sync_dates()
             self.load_records(warn=False)
 
     def _schedule_reload(self, *_):
@@ -297,30 +375,37 @@ class AuditTrailWidget(QWidget):
         self.btn_export.setEnabled(len(rows) > 0)
 
     # ── Export ────────────────────────────────────────────────────────────
-    def export_csv(self):
+    def export_excel(self):
         """Exports every record matching the current filters (not just the first 1,000)."""
         filters = self._read_filters(warn=True)
         if filters is None:
             return
 
-        default = f"audit_trail_{filters['date_from']:%Y%m%d}_{filters['date_to']:%Y%m%d}.csv"
+        try:
+            import openpyxl  # noqa: F401
+        except ImportError:
+            QMessageBox.warning(self, "Missing Package",
+                                "Excel export needs the 'openpyxl' package.\n\n"
+                                "Install it with:  pip install openpyxl")
+            return
+
+        default = f"audit_trail_{filters['date_from']:%Y%m%d}_{filters['date_to']:%Y%m%d}.xlsx"
         path, _ = QFileDialog.getSaveFileName(self, "Export Audit Trail", default,
-                                              "CSV Files (*.csv)")
+                                              "Excel Files (*.xlsx)")
         if not path:
             return
+        if not path.lower().endswith(".xlsx"):
+            path += ".xlsx"
 
         QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
         try:
             rows = get_records(limit=None, **filters)
-            # utf-8-sig so Excel opens it with the right encoding
-            with open(path, "w", newline="", encoding="utf-8-sig") as f:
-                writer = csv.writer(f)
-                writer.writerow(COLUMNS)
-                for r in rows:
-                    writer.writerow(row_texts(r))
+            write_xlsx(path, rows)
         except Exception as e:
             QApplication.restoreOverrideCursor()
-            QMessageBox.critical(self, "Export Failed", f"Could not export the audit trail:\n{e}")
+            QMessageBox.critical(self, "Export Failed",
+                                 f"Could not export the audit trail:\n{e}\n\n"
+                                 "If the file is open in Excel, close it and try again.")
             return
         QApplication.restoreOverrideCursor()
 

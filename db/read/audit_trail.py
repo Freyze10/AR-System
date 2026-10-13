@@ -46,6 +46,17 @@ def _like(text):
     return f"%{escaped}%"
 
 
+def get_date_range():
+    """(first_date, last_date) found in the audit trail, or (None, None) when it is empty."""
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute('SELECT MIN("timestamp")::date, MAX("timestamp")::date FROM tbl_audit_trail')
+            return cur.fetchone()
+    finally:
+        conn.close()
+
+
 def get_records(search="", column="all", date_from=None, date_to=None, limit=1000):
     """Newest first. date_from / date_to are datetime.date and both inclusive.
     limit=None returns everything (used by the export)."""

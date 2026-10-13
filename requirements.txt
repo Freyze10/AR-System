@@ -6,3 +6,4 @@ pillow==12.1.1
 QtAwesome==1.4.1
 dbfread==2.0.7
 psutil==7.2.2
+openpyxl==3.2.0b1

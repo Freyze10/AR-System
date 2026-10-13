@@ -30,7 +30,6 @@ class AcknowledgementReceiptWidget(QWidget):
         # Wiring
         self.records_tab.view_requested.connect(lambda ar_no: self._open_record(ar_no, MODE_VIEW))
         self.records_tab.update_requested.connect(lambda ar_no: self._open_record(ar_no, MODE_UPDATE))
-        self.records_tab.close_requested.connect(self.close_requested)
         self.entry_tab.saved.connect(lambda _ar_no: self.records_tab.load_records())
         self.entry_tab.close_requested.connect(lambda: self.tabs.setCurrentWidget(self.records_tab))
         self.tabs.currentChanged.connect(self._on_tab_changed)

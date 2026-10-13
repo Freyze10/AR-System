@@ -87,7 +87,6 @@ class ARRecordsTab(QWidget):
 
     view_requested = pyqtSignal(int)    # ar_no
     update_requested = pyqtSignal(int)  # ar_no
-    close_requested = pyqtSignal()
 
     def __init__(self):
         super().__init__()
@@ -192,11 +191,7 @@ class ARRecordsTab(QWidget):
         btn_refresh.setObjectName("PrimaryButton")
         btn_refresh.clicked.connect(self.load_records)
 
-        btn_close = QPushButton(" Back", icon=_icon("ri.arrow-go-back-line", "#DC2626", "white"))
-        btn_close.setObjectName("DangerOutlineButton")
-        btn_close.clicked.connect(self.close_requested.emit)
-
-        for b in (self.btn_update, self.btn_view, btn_refresh, btn_close):
+        for b in (self.btn_update, self.btn_view, btn_refresh):
             footer.addWidget(b)
         root.addLayout(footer)
 

@@ -57,9 +57,8 @@ def get_date_range():
         conn.close()
 
 
-def get_records(search="", column="all", date_from=None, date_to=None, limit=1000):
-    """Newest first. date_from / date_to are datetime.date and both inclusive.
-    limit=None returns everything (used by the export)."""
+def get_records(search="", column="all", date_from=None, date_to=None):
+    """Newest first, no row limit. date_from / date_to are datetime.date and both inclusive."""
     where, params = [], []
 
     if date_from:
@@ -79,9 +78,6 @@ def get_records(search="", column="all", date_from=None, date_to=None, limit=100
     if where:
         sql += " WHERE " + " AND ".join(where)
     sql += " ORDER BY a.timestamp DESC, a.id DESC"
-    if limit:
-        sql += " LIMIT %s"
-        params.append(limit)
 
     conn = get_connection()
     try:

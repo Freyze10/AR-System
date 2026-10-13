@@ -1,5 +1,5 @@
 import qtawesome as fa
-from PyQt6.QtCore import Qt, QAbstractTableModel, QModelIndex, QTimer, pyqtSignal
+from PyQt6.QtCore import Qt, QAbstractTableModel, QModelIndex, pyqtSignal
 from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QComboBox,
@@ -7,6 +7,7 @@ from PyQt6.QtWidgets import (
 )
 
 from db.read.ar_report import SEARCH_COLUMNS, get_records
+from util.debounce import finished_typing
 
 COLUMNS = ["AR No.", "AR Date", "Customer", "Product Code", "Product Color", "Quantity / Unit", "Count"]
 
@@ -21,19 +22,6 @@ CANCELED_BG = QColor("#FEF2F2")
 
 def _icon(name, color, active=None):
     return fa.icon(name, color=color, color_active=active or color, color_disabled="#94A3B8")
-
-
-def finished_typing(line_edit, callback, delay=400):
-    """Calls `callback` once the user has stopped typing in `line_edit` for `delay` ms.
-    Returns the timer so the caller can stop it."""
-    timer = QTimer(line_edit)
-    timer.setSingleShot(True)
-    timer.timeout.connect(callback)
-
-    # Restart the timer on every text change
-    line_edit.textChanged.connect(lambda: timer.start(delay))
-    return timer
-
 
 class ARTableModel(QAbstractTableModel):
     """Read-only model. Display text is prepared once; the view only asks for visible rows."""

@@ -9,8 +9,7 @@ from PyQt6.QtWidgets import (
 )
 
 from db.read.audit_trail import SEARCH_COLUMNS, get_date_range, get_records
-
-ROW_LIMIT = 1000
+from util.debounce import finished_typing
 
 COLUMNS = ["Timestamp", "Workstation", "Action", "Details", "IP Address",
            "User MAC", "Workstation MAC"]
@@ -138,7 +137,7 @@ class AuditTrailWidget(QWidget):
         super().__init__()
         self.model = AuditTableModel()
 
-        # Waits a moment after the user stops typing / picking before querying
+        # Waits a moment after a date or column is picked before querying
         self._reload_timer = QTimer(self)
         self._reload_timer.setSingleShot(True)
         self._reload_timer.setInterval(350)
@@ -202,7 +201,9 @@ class AuditTrailWidget(QWidget):
         root.addWidget(card)
 
         self.txt_search.returnPressed.connect(lambda: self.load_records())
-        self.txt_search.textChanged.connect(self._schedule_reload)
+        # Searches while typing, once the user pauses
+        self._search_timer = finished_typing(
+            self.txt_search, lambda: self.load_records(warn=False), delay=400)
         self.cmb_column.currentIndexChanged.connect(self._on_column_changed)
         self.date_from.dateChanged.connect(self._schedule_reload)
         self.date_to.dateChanged.connect(self._schedule_reload)
@@ -356,12 +357,13 @@ class AuditTrailWidget(QWidget):
 
     def load_records(self, warn=True):
         self._reload_timer.stop()
+        self._search_timer.stop()
         filters = self._read_filters(warn)
         if filters is None:
             return
 
         try:
-            rows = get_records(limit=ROW_LIMIT, **filters)
+            rows = get_records(**filters)
         except Exception as e:
             QMessageBox.critical(self, "Database Error", f"Could not load the audit trail:\n{e}")
             return
@@ -370,13 +372,12 @@ class AuditTrailWidget(QWidget):
         self.model.set_rows(rows)
         self.table.resizeRowsToContents()
 
-        suffix = f" (showing newest {ROW_LIMIT:,}, export for all)" if len(rows) >= ROW_LIMIT else ""
-        self.lbl_count.setText(f"{len(rows):,} record(s){suffix}")
+        self.lbl_count.setText(f"{len(rows):,} record(s)")
         self.btn_export.setEnabled(len(rows) > 0)
 
     # ── Export ────────────────────────────────────────────────────────────
     def export_excel(self):
-        """Exports every record matching the current filters (not just the first 1,000)."""
+        """Exports the records matching the current filters."""
         filters = self._read_filters(warn=True)
         if filters is None:
             return
@@ -399,7 +400,7 @@ class AuditTrailWidget(QWidget):
 
         QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
         try:
-            rows = get_records(limit=None, **filters)
+            rows = get_records(**filters)
             write_xlsx(path, rows)
         except Exception as e:
             QApplication.restoreOverrideCursor()

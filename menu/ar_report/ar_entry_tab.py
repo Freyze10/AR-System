@@ -13,7 +13,8 @@ from db.write.ar_report import update_receipt, create_receipt
 from db.write.audit_trail import log_action
 from menu.ar_report.ar_audit import (describe_save, describe_update,
                                      normalize_item, workstation_mac)
-from print.print_ar import ARPrintPreview, build_print_data
+from print.print_ar import (ARPrintPreview, TEMPLATE_PATH, TEMPLATE_WIDE_PATH,
+                            build_print_data)
 
 MAX_ITEMS = 5
 UNITS = ["KG.", "PC.", "PCS.", "MGS.", "GMS.", "SET.", "SETS."]
@@ -24,7 +25,7 @@ MODE_NEW = "new"        # after New: editable, Save enabled
 MODE_VIEW = "view"      # record loaded, read only, Save disabled
 MODE_UPDATE = "update"  # record loaded, editable, Save becomes Update
 
-PRINT_MODES = (MODE_VIEW, MODE_UPDATE)   # modes in which the Print button is enabled
+PRINT_MODES = (MODE_VIEW, MODE_UPDATE)   # modes in which the Print buttons are enabled
 
 TITLES = {
     MODE_IDLE: ("Acknowledgement Receipt Entry",
@@ -203,9 +204,15 @@ class AREntryTab(QWidget):
         footer.setSpacing(8)
         footer.addStretch(1)
 
+        # Print Wide uses the template with the wider product code column.
+        # The buttons use a lambda because clicked sends a True/False value we do not want in `wide`.
+        self.btn_print_wide = QPushButton(" Print Wide", icon=_icon("fa5s.print", "white"))
+        self.btn_print_wide.setObjectName("SecondaryButton")
+        self.btn_print_wide.clicked.connect(lambda: self.print_receipt(wide=True))
+
         self.btn_print = QPushButton(" Print", icon=_icon("fa5s.print", "white"))
         self.btn_print.setObjectName("SecondaryButton")
-        self.btn_print.clicked.connect(self.print_receipt)
+        self.btn_print.clicked.connect(lambda: self.print_receipt())
 
         self.btn_new = QPushButton(" New", icon=_icon("fa5s.file-alt", "white"))
         self.btn_new.setObjectName("InfoButton")
@@ -219,7 +226,7 @@ class AREntryTab(QWidget):
         btn_close.setObjectName("DangerOutlineButton")
         btn_close.clicked.connect(self.close_tab)
 
-        for b in (self.btn_print, self.btn_new, self.btn_save, btn_close):
+        for b in (self.btn_print_wide, self.btn_print, self.btn_new, self.btn_save, btn_close):
             footer.addWidget(b)
         root.addLayout(footer)
 
@@ -299,8 +306,11 @@ class AREntryTab(QWidget):
         self.btn_remove.setEnabled(editable and row_selected)
         self.btn_clear.setEnabled(editable and n > 0)
         self.btn_save.setEnabled(editable)
-        self.btn_print.setEnabled(
-            self.mode in PRINT_MODES and self._current_ar_no is not None and n > 0)
+
+        # Both print buttons follow the same rule
+        can_print = self.mode in PRINT_MODES and self._current_ar_no is not None and n > 0
+        self.btn_print.setEnabled(can_print)
+        self.btn_print_wide.setEnabled(can_print)
 
         if self.mode == MODE_IDLE:
             hint = "Click New to start a receipt."
@@ -573,8 +583,11 @@ class AREntryTab(QWidget):
             self.close_requested.emit()   # back to the Record tab
 
     # ── Printing ──────────────────────────────────────────────────────────
-    def print_receipt(self):
-        """Open the print preview for the receipt shown in the form."""
+    def print_receipt(self, wide=False):
+        """Open the print preview for the receipt shown in the form.
+
+        wide=True uses the template with the wider product code column.
+        """
         if self.mode not in PRINT_MODES or self._current_ar_no is None:
             return
         # While updating, the print shows what is on screen, which may not be saved yet
@@ -595,7 +608,8 @@ class AREntryTab(QWidget):
             prepared_by=self.lbl_by.text(),
             items=rows,
         )
-        preview = ARPrintPreview(data, parent=self.window())
+        preview = ARPrintPreview(data, parent=self.window(),
+                                 template_path=TEMPLATE_WIDE_PATH if wide else TEMPLATE_PATH)
         # The preview tells us when the receipt was really sent to the printer
         preview.printed.connect(lambda printer, d=data: self._log_print(d, printer))
         preview.show()

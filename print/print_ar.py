@@ -2,8 +2,8 @@
 
 The big picture:
   1. The entry tab gives us the receipt data (header + items).
-  2. We open the Excel template (ar_template.xlsx) in a hidden Excel, set the paper size
-     the user picked, and fill in its cells.
+  2. We open the Excel template (ar_template.xlsx, or the wide one) in a hidden Excel,
+     set the paper size the user picked, and fill in its cells.
   3. We save the filled copy as an .xlsx file and also export it as a PDF.
   4. The window shows that PDF as the preview. The .xlsx is only sent to the printer
      (through Excel) when the user clicks Print.
@@ -29,10 +29,12 @@ from PyQt6.QtPdfWidgets import QPdfView
 from PyQt6.QtWidgets import (QComboBox, QHBoxLayout, QLabel, QMessageBox,
                              QPushButton, QVBoxLayout, QWidget)
 
-# Where the template lives. When the app is packaged with PyInstaller the files are
+# Where the templates live. When the app is packaged with PyInstaller the files are
 # unpacked into sys._MEIPASS; otherwise we use the folder of this file.
 BASE_DIR = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
 TEMPLATE_PATH = os.path.join(BASE_DIR, "ar_template.xlsx")
+# Template with the wider product code column, used by the "Print Wide" button
+TEMPLATE_WIDE_PATH = os.path.join(BASE_DIR, "ar_template_prod_code_wide.xlsx")
 
 # The printer with this text in its name is selected automatically.
 # If there is none, the Windows default printer is selected.
@@ -66,6 +68,13 @@ NOTE_COLS = ("B", "P")             # merged, left aligned, indented, placed on t
 NOTE_INDENT = 9                   # how far the note is pushed to the right (Excel indent levels)
 FOOTER_COLS = ("B", "Q")           # merged, centered, placed right after the last item row
 FOOTER_TEXT = "*****NOTHING FOLLOWS*****"
+
+# ── Template layout (ar_template_prod_code_wide.xlsx) ─────────────────────
+# The wide template has a wider product code column, so the product code, color and lot
+# blocks start one column later. Quantity, unit, notes and the footer are the same.
+WIDE_CODE_COLS = ("F", "I")        # merged, centered
+WIDE_COLOR_COLS = ("J", "K")       # merged, left aligned
+WIDE_LOT_COLS = ("L", "Q")         # merged, left aligned
 
 # Extra space (in points) kept free when checking whether a piece of text fits in a cell.
 FIT_MARGIN_PTS = 2.0
@@ -254,11 +263,18 @@ def _merge(ws, row, cols, horizontal, indent=0):
     return ws.Range(f"{c1}{row}")
 
 
-def fill_sheet(ws, data, fit):
+def fill_sheet(ws, data, fit, wide=False):
     """Writes the header and the items into the template.
 
     fit.width(text, font) returns how wide a text is in points (measured by Excel).
+    wide=True uses the column blocks of the wide template (WIDE_CODE_COLS and so on).
     """
+    # Which columns hold the product code, color and lot number in this template
+    if wide:
+        code_cols, color_cols, lot_cols = WIDE_CODE_COLS, WIDE_COLOR_COLS, WIDE_LOT_COLS
+    else:
+        code_cols, color_cols, lot_cols = CODE_COLS, COLOR_COLS, LOT_COLS
+
     # 1. Header values (AR no., date, customer, prepared by)
     for key, addr in HEADER_CELLS.items():
         _put_text(ws.Range(addr), data[key])
@@ -277,7 +293,7 @@ def fill_sheet(ws, data, fit):
         return lambda text: fit.width(text, font) <= limit
 
     # 3. Work out the rows needed (long codes, lots and notes wrap onto extra rows)
-    rows = plan_rows(data["items"], fits_for(CODE_COLS), fits_for(LOT_COLS),
+    rows = plan_rows(data["items"], fits_for(code_cols), fits_for(lot_cols),
                      fits_for(NOTE_COLS, NOTE_INDENT))
 
     # 4. The form has a fixed number of rows. +1 is for the NOTHING FOLLOWS row.
@@ -304,17 +320,17 @@ def fill_sheet(ws, data, fit):
             qty.Value = item["qty"]
             qty.ShrinkToFit = True
             _put_text(_merge(ws, r, UNIT_COLS, XL_CENTER), item["unit"])
-            _put_text(_merge(ws, r, COLOR_COLS, XL_LEFT), item["prod_color"])    # left + bottom aligned
+            _put_text(_merge(ws, r, color_cols, XL_CENTER), item["prod_color"])    # left + bottom aligned
 
         # Product code: the first row, or any extra row that carries a wrapped piece of it
         if spec["first"] or spec["code"] is not None:
-            cell = _merge(ws, r, CODE_COLS, XL_CENTER)
+            cell = _merge(ws, r, code_cols, XL_CENTER)
             if spec["code"]:
                 _put_text(cell, spec["code"])
 
         # Lot number: same idea as the product code, but left + bottom aligned
         if spec["first"] or spec["lot"] is not None:
-            cell = _merge(ws, r, LOT_COLS, XL_LEFT)
+            cell = _merge(ws, r, lot_cols, XL_LEFT)
             if spec["lot"]:
                 _put_text(cell, spec["lot"])
 
@@ -366,6 +382,9 @@ def render_files(template_path, xlsx_path, pdf_path, data, printer_name="", pape
     if not os.path.exists(template_path):
         raise FileNotFoundError(f"Template not found:\n{template_path}")
 
+    # The wide template has its own column blocks (see WIDE_CODE_COLS and so on)
+    wide = os.path.abspath(template_path) == os.path.abspath(TEMPLATE_WIDE_PATH)
+
     pythoncom.CoInitialize()           # required before using COM in a background thread
     try:
         with _printer_as_default(printer_name):
@@ -378,7 +397,7 @@ def render_files(template_path, xlsx_path, pdf_path, data, printer_name="", pape
 
                 fit = _ExcelFit(excel)
                 try:
-                    fill_sheet(ws, data, fit)
+                    fill_sheet(ws, data, fit, wide=wide)
                 finally:
                     fit.close()
 
@@ -429,13 +448,17 @@ class _Worker(QThread):
 
 
 class ARPrintPreview(QWidget):
-    """Window that shows the filled Excel template as a PDF and prints only when Print is clicked."""
+    """Window that shows the filled Excel template as a PDF and prints only when Print is clicked.
+
+    template_path: TEMPLATE_PATH (standard form) or TEMPLATE_WIDE_PATH (wide product code form).
+    """
 
     printed = pyqtSignal(str)          # sent after the receipt was sent to the printer (with the printer name)
 
-    def __init__(self, data, parent=None):
+    def __init__(self, data, parent=None, template_path=TEMPLATE_PATH):
         super().__init__(parent)
         self.data = data
+        self.template_path = template_path     # which Excel template this preview is built from
         self._worker = None            # the background job currently running
         self._ready = False            # True once the preview PDF of the current printer/paper is loaded
         self._printer = ""             # the printer that was chosen when Print was clicked
@@ -453,7 +476,8 @@ class ARPrintPreview(QWidget):
                             Qt.WindowType.WindowMaximizeButtonHint |
                             Qt.WindowType.WindowCloseButtonHint)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
-        self.setWindowTitle(f"Print Preview | AR {data['ar_no']}")
+        kind = " (Wide)" if template_path == TEMPLATE_WIDE_PATH else ""
+        self.setWindowTitle(f"Print Preview{kind} | AR {data['ar_no']}")
         self.resize(900, 900)
 
         self._build_ui()
@@ -579,7 +603,7 @@ class ARPrintPreview(QWidget):
         self.pdf_path = os.path.join(self.tmp_dir, f"ar_{self._build_no}.pdf")
 
         self._set_busy(True, "Preparing preview...")
-        self._run(render_files, TEMPLATE_PATH, self.xlsx_path, self.pdf_path, self.data,
+        self._run(render_files, self.template_path, self.xlsx_path, self.pdf_path, self.data,
                   self.cmb_printer.currentText(), self.cmb_paper.currentData(),
                   done=self._show_pdf)
 

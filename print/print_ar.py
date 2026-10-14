@@ -2,10 +2,13 @@
 
 The big picture:
   1. The entry tab gives us the receipt data (header + items).
-  2. We open the Excel template (ar_template.xlsx) in a hidden Excel and fill in its cells.
+  2. We open the Excel template (ar_template.xlsx) in a hidden Excel, set the paper size
+     the user picked, and fill in its cells.
   3. We save the filled copy as an .xlsx file and also export it as a PDF.
   4. The window shows that PDF as the preview. The .xlsx is only sent to the printer
      (through Excel) when the user clicks Print.
+  5. Changing the printer or the paper size builds the preview again, so the preview
+     always shows what will be printed on that paper.
 
 Excel is controlled through COM (win32com), so this only works on Windows with Excel installed.
 """
@@ -13,12 +16,14 @@ import os
 import shutil
 import sys
 import tempfile
+from contextlib import contextmanager
 
 import pythoncom                     # needed to use COM from a background thread
 import qtawesome as fa
 import win32com.client               # lets Python control Excel
-import win32print                    # lists printers / changes the default printer
-from PyQt6.QtCore import Qt, QThread, pyqtSignal
+import win32con                      # Windows constants (DC_PAPERS, DC_PAPERNAMES)
+import win32print                    # lists printers / paper sizes / changes the default printer
+from PyQt6.QtCore import QSettings, Qt, QThread, pyqtSignal
 from PyQt6.QtPdf import QPdfDocument
 from PyQt6.QtPdfWidgets import QPdfView
 from PyQt6.QtWidgets import (QComboBox, QHBoxLayout, QLabel, QMessageBox,
@@ -28,6 +33,13 @@ from PyQt6.QtWidgets import (QComboBox, QHBoxLayout, QLabel, QMessageBox,
 # unpacked into sys._MEIPASS; otherwise we use the folder of this file.
 BASE_DIR = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
 TEMPLATE_PATH = os.path.join(BASE_DIR, "ar_template.xlsx")
+
+# The printer with this text in its name is selected automatically.
+# If there is none, the Windows default printer is selected.
+PREFERRED_PRINTER = "LX"
+
+# First item of the paper list: keep the paper size saved inside the template.
+TEMPLATE_PAPER_LABEL = "(Template default)"
 
 # ── Template layout (ar_template.xlsx) ────────────────────────────────────
 # Excel cell address for each header value on the form.
@@ -86,6 +98,67 @@ def build_print_data(ar_no, ar_date, customer, prepared_by, items):
             for qty, unit, code, color, lot, note in items
         ],
     }
+
+
+# ── Printers and paper sizes ──────────────────────────────────────────────
+def list_printers():
+    """Names of all printers Windows knows (local and network)."""
+    flags = win32print.PRINTER_ENUM_LOCAL | win32print.PRINTER_ENUM_CONNECTIONS
+    return [p[2] for p in win32print.EnumPrinters(flags)]       # p[2] is the printer name
+
+
+def pick_printer(names):
+    """The printer to select first: one with PREFERRED_PRINTER in its name, else the Windows default."""
+    for name in names:
+        if PREFERRED_PRINTER.upper() in name.upper():
+            return name
+    try:
+        return win32print.GetDefaultPrinter()
+    except Exception:
+        return names[0] if names else ""
+
+
+def get_paper_sizes(printer_name):
+    """Paper sizes the printer offers, as [(paper_id, name), ...].
+
+    Windows reports the user-defined sizes added in the printer's settings too.
+    The id is the number Excel uses for that paper size.
+    """
+    try:
+        handle = win32print.OpenPrinter(printer_name)
+        try:
+            port = win32print.GetPrinter(handle, 2)["pPortName"]
+        finally:
+            win32print.ClosePrinter(handle)
+        ids = win32print.DeviceCapabilities(printer_name, port, win32con.DC_PAPERS) or []
+        names = win32print.DeviceCapabilities(printer_name, port, win32con.DC_PAPERNAMES) or []
+    except Exception:
+        return []                                  # printer offline / no info: only the template paper is offered
+    return [(int(i), str(n).strip("\x00 ")) for i, n in zip(ids, names)]
+
+
+@contextmanager
+def _printer_as_default(printer_name):
+    """Makes printer_name the Windows default printer while the block runs, then puts the old one back.
+
+    Excel works with the paper sizes of its current printer, which is the Windows default
+    printer when Excel starts. So the chosen printer must be the default while Excel runs.
+    """
+    previous = win32print.GetDefaultPrinter()
+    switched = bool(printer_name) and printer_name != previous
+    if switched:
+        win32print.SetDefaultPrinter(printer_name)
+    try:
+        yield
+    finally:
+        if switched:
+            win32print.SetDefaultPrinter(previous)   # always restore the user's default printer
+
+
+def _apply_paper(ws, paper_id):
+    """Uses the chosen paper size on the sheet. None = keep the paper size saved in the template."""
+    if paper_id:
+        ws.PageSetup.PaperSize = paper_id
 
 
 # ── Layout logic (no Excel needed) ────────────────────────────────────────
@@ -231,7 +304,7 @@ def fill_sheet(ws, data, fit):
             qty.Value = item["qty"]
             qty.ShrinkToFit = True
             _put_text(_merge(ws, r, UNIT_COLS, XL_CENTER), item["unit"])
-            _put_text(_merge(ws, r, COLOR_COLS, XL_CENTER), item["prod_color"])   # left + bottom aligned
+            _put_text(_merge(ws, r, COLOR_COLS, XL_LEFT), item["prod_color"])    # left + bottom aligned
 
         # Product code: the first row, or any extra row that carries a wrapped piece of it
         if spec["first"] or spec["code"] is not None:
@@ -285,56 +358,55 @@ class _ExcelFit:
         self.wb.Close(False)           # False = do not save the scratch workbook
 
 
-def render_files(template_path, xlsx_path, pdf_path, data):
-    """Fills the template, then saves the filled copy (.xlsx) and a PDF of it (for the preview)."""
+def render_files(template_path, xlsx_path, pdf_path, data, printer_name="", paper_id=None):
+    """Fills the template, then saves the filled copy (.xlsx) and a PDF of it (for the preview).
+
+    printer_name / paper_id decide the page size used for the PDF and saved in the copy.
+    """
     if not os.path.exists(template_path):
         raise FileNotFoundError(f"Template not found:\n{template_path}")
 
     pythoncom.CoInitialize()           # required before using COM in a background thread
-    excel = None
     try:
-        excel = _new_excel()
-        # ReadOnly: the template itself is never changed
-        wb = excel.Workbooks.Open(os.path.abspath(template_path), ReadOnly=True)
-        ws = wb.ActiveSheet
+        with _printer_as_default(printer_name):
+            excel = _new_excel()
+            try:
+                # ReadOnly: the template itself is never changed
+                wb = excel.Workbooks.Open(os.path.abspath(template_path), ReadOnly=True)
+                ws = wb.ActiveSheet
+                _apply_paper(ws, paper_id)
 
-        fit = _ExcelFit(excel)
-        try:
-            fill_sheet(ws, data, fit)
-        finally:
-            fit.close()
+                fit = _ExcelFit(excel)
+                try:
+                    fill_sheet(ws, data, fit)
+                finally:
+                    fit.close()
 
-        wb.Activate()
-        wb.SaveCopyAs(os.path.abspath(xlsx_path))                 # the filled .xlsx used for printing
-        ws.ExportAsFixedFormat(0, os.path.abspath(pdf_path))      # 0 = PDF, used for the preview
-        wb.Close(False)
+                wb.Activate()
+                wb.SaveCopyAs(os.path.abspath(xlsx_path))                 # the filled .xlsx used for printing
+                ws.ExportAsFixedFormat(0, os.path.abspath(pdf_path))      # 0 = PDF, used for the preview
+                wb.Close(False)
+            finally:
+                excel.Quit()
     finally:
-        if excel is not None:
-            excel.Quit()
         pythoncom.CoUninitialize()
 
 
-def print_xlsx(xlsx_path, printer_name):
-    """Prints the filled sheet through Excel on the chosen printer."""
+def print_xlsx(xlsx_path, printer_name, paper_id=None):
+    """Prints the filled sheet through Excel on the chosen printer and paper size."""
     pythoncom.CoInitialize()
-    excel = None
-    previous = None
     try:
-        # Excel prints to the Windows default printer, so we switch it for a moment
-        previous = win32print.GetDefaultPrinter()
-        if printer_name and printer_name != previous:
-            win32print.SetDefaultPrinter(printer_name)
-
-        excel = _new_excel()
-        wb = excel.Workbooks.Open(os.path.abspath(xlsx_path), ReadOnly=True)
-        wb.ActiveSheet.PrintOut(Copies=1)
-        wb.Close(False)
+        with _printer_as_default(printer_name):
+            excel = _new_excel()
+            try:
+                wb = excel.Workbooks.Open(os.path.abspath(xlsx_path), ReadOnly=True)
+                ws = wb.ActiveSheet
+                _apply_paper(ws, paper_id)       # same paper size as the preview
+                ws.PrintOut(Copies=1)
+                wb.Close(False)
+            finally:
+                excel.Quit()
     finally:
-        if excel is not None:
-            excel.Quit()
-        # Always put the user's original default printer back
-        if previous and printer_name and printer_name != previous:
-            win32print.SetDefaultPrinter(previous)
         pythoncom.CoUninitialize()
 
 
@@ -365,13 +437,15 @@ class ARPrintPreview(QWidget):
         super().__init__(parent)
         self.data = data
         self._worker = None            # the background job currently running
-        self._ready = False            # True once the preview PDF is loaded
+        self._ready = False            # True once the preview PDF of the current printer/paper is loaded
         self._printer = ""             # the printer that was chosen when Print was clicked
+        self._build_no = 0             # counts preview builds, so every build gets its own files
+        self._settings = QSettings("MBPI", "AR-System")    # remembers the paper size picked per printer
 
-        # A private temp folder for the filled .xlsx and the PDF; deleted when the window closes
+        # A private temp folder for the filled .xlsx and the PDFs; deleted when the window closes
         self.tmp_dir = tempfile.mkdtemp(prefix="mbpi_ar_")
-        self.xlsx_path = os.path.join(self.tmp_dir, "ar.xlsx")
-        self.pdf_path = os.path.join(self.tmp_dir, "ar.pdf")
+        self.xlsx_path = ""
+        self.pdf_path = ""
 
         # Open as its own normal window (with minimize / maximize / close buttons)
         self.setWindowFlags(Qt.WindowType.Window |
@@ -391,15 +465,12 @@ class ARPrintPreview(QWidget):
         root.setContentsMargins(16, 16, 16, 16)
         root.setSpacing(12)
 
-        # Top bar: printer choice, status text, Print and Close buttons
+        # Top bar: printer choice, Print and Close buttons
         bar = QHBoxLayout()
         bar.setSpacing(8)
         lbl = QLabel("PRINTER")
         lbl.setObjectName("FieldLabel")
         self.cmb_printer = QComboBox()
-        self._load_printers()
-        self.lbl_status = QLabel("")
-        self.lbl_status.setObjectName("SubtitleLabel")
 
         self.btn_print = QPushButton(
             " Print", icon=fa.icon("fa5s.print", color="white", color_disabled="#94A3B8"))
@@ -412,12 +483,32 @@ class ARPrintPreview(QWidget):
 
         bar.addWidget(lbl)
         bar.addWidget(self.cmb_printer, 1)
-        bar.addWidget(self.lbl_status)
         bar.addWidget(self.btn_print)
         bar.addWidget(btn_close)
         root.addLayout(bar)
 
-        # The PDF viewer, fitted to the window width
+        # Second bar: paper size choice and status text
+        bar2 = QHBoxLayout()
+        bar2.setSpacing(8)
+        lbl2 = QLabel("PAPER SIZE")
+        lbl2.setObjectName("FieldLabel")
+        self.cmb_paper = QComboBox()
+        self.lbl_status = QLabel("")
+        self.lbl_status.setObjectName("SubtitleLabel")
+        bar2.addWidget(lbl2)
+        bar2.addWidget(self.cmb_paper, 1)
+        bar2.addWidget(self.lbl_status)
+        root.addLayout(bar2)
+
+        # Fill both lists first, then listen for the user's choices.
+        # "activated" fires only when the USER picks an item, not when we fill the list.
+        self._load_printers()
+        self._load_papers()
+        self.cmb_printer.activated.connect(self._on_printer_changed)
+        self.cmb_paper.activated.connect(self._on_paper_changed)
+
+        # The PDF viewer, fitted to the window width. All pages are shown, so you can see
+        # if the print would continue on a second page.
         self.pdf_doc = QPdfDocument(self)
         self.pdf_view = QPdfView(self)
         self.pdf_view.setDocument(self.pdf_doc)
@@ -426,20 +517,36 @@ class ARPrintPreview(QWidget):
         root.addWidget(self.pdf_view, 1)
 
     def _load_printers(self):
-        """Fills the printer list and selects the Windows default printer."""
+        """Fills the printer list and selects the LX printer, or the Windows default if there is none."""
         try:
-            flags = win32print.PRINTER_ENUM_LOCAL | win32print.PRINTER_ENUM_CONNECTIONS
-            for p in win32print.EnumPrinters(flags):
-                self.cmb_printer.addItem(p[2])               # p[2] is the printer name
-            self.cmb_printer.setCurrentText(win32print.GetDefaultPrinter())
+            names = list_printers()
         except Exception:
-            pass                                             # no printers found: the list stays empty
+            names = []                                       # no printers found: the list stays empty
+        self.cmb_printer.addItems(names)
+        self.cmb_printer.setCurrentText(pick_printer(names))
+
+    def _paper_key(self):
+        """Settings key that remembers the paper size for the selected printer."""
+        printer = self.cmb_printer.currentText().replace("\\", "_").replace("/", "_")
+        return f"paper/{printer}"
+
+    def _load_papers(self):
+        """Fills the paper list for the selected printer and selects the one used last time."""
+        self.cmb_paper.clear()
+        self.cmb_paper.addItem(TEMPLATE_PAPER_LABEL, None)   # None = do not change the template's paper
+        for paper_id, name in get_paper_sizes(self.cmb_printer.currentText()):
+            self.cmb_paper.addItem(name, paper_id)
+        saved = str(self._settings.value(self._paper_key(), ""))
+        self.cmb_paper.setCurrentIndex(max(self.cmb_paper.findText(saved), 0))
 
     # ── Helpers ───────────────────────────────────────────────────────────
     def _set_busy(self, busy, text=""):
-        """Shows a status text and only enables Print when the preview is ready and nothing is running."""
+        """Shows a status text. While busy the choices are locked, and Print is only enabled
+        when the preview of the current printer and paper is ready."""
         self.lbl_status.setText(text)
         self.btn_print.setEnabled(self._ready and not busy)
+        self.cmb_printer.setEnabled(not busy)
+        self.cmb_paper.setEnabled(not busy)
 
     def _run(self, fn, *args, done):
         """Runs fn(*args) in the background; calls done() when it finishes, or shows an error."""
@@ -453,10 +560,27 @@ class ARPrintPreview(QWidget):
         self._set_busy(False)
         QMessageBox.critical(self, "Error", msg)
 
+    # ── Changing printer / paper ──────────────────────────────────────────
+    def _on_printer_changed(self, _index):
+        self._load_papers()            # every printer has its own paper sizes
+        self._build_preview()
+
+    def _on_paper_changed(self, _index):
+        self._settings.setValue(self._paper_key(), self.cmb_paper.currentText())   # remember it
+        self._build_preview()
+
     # ── Preview ───────────────────────────────────────────────────────────
     def _build_preview(self):
+        """Builds the preview for the selected printer and paper size (in the background)."""
+        self._ready = False            # no printing until this preview is ready
+        self._build_no += 1
+        # New file names each time: the previous PDF may still be open in the viewer
+        self.xlsx_path = os.path.join(self.tmp_dir, f"ar_{self._build_no}.xlsx")
+        self.pdf_path = os.path.join(self.tmp_dir, f"ar_{self._build_no}.pdf")
+
         self._set_busy(True, "Preparing preview...")
         self._run(render_files, TEMPLATE_PATH, self.xlsx_path, self.pdf_path, self.data,
+                  self.cmb_printer.currentText(), self.cmb_paper.currentData(),
                   done=self._show_pdf)
 
     def _show_pdf(self):
@@ -470,7 +594,8 @@ class ARPrintPreview(QWidget):
         self._printer = self.cmb_printer.currentText()    # remember it for the audit trail
         self.btn_print.setText(" Sending...")
         self._set_busy(True, "Sending to printer...")
-        self._run(print_xlsx, self.xlsx_path, self._printer, done=self._printed)
+        self._run(print_xlsx, self.xlsx_path, self._printer, self.cmb_paper.currentData(),
+                  done=self._printed)
 
     def _printed(self):
         # Tell the entry tab first so the audit entry is written right away,

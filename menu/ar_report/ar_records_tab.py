@@ -23,6 +23,7 @@ CANCELED_BG = QColor("#FEF2F2")
 def _icon(name, color, active=None):
     return fa.icon(name, color=color, color_active=active or color, color_disabled="#94A3B8")
 
+
 class ARTableModel(QAbstractTableModel):
     """Read-only model. Display text is prepared once; the view only asks for visible rows."""
 
@@ -187,9 +188,10 @@ class ARRecordsTab(QWidget):
         self.btn_view.setObjectName("SecondaryButton")
         self.btn_view.clicked.connect(lambda: self._emit_for_selected(self.view_requested))
 
+        # Refresh = reset the whole page, then load everything from the database again
         btn_refresh = QPushButton(" Refresh", icon=_icon("fa5s.sync-alt", "white"))
         btn_refresh.setObjectName("PrimaryButton")
-        btn_refresh.clicked.connect(self.load_records)
+        btn_refresh.clicked.connect(self.reset_page)
 
         for b in (self.btn_update, self.btn_view, btn_refresh):
             footer.addWidget(b)
@@ -213,6 +215,23 @@ class ARRecordsTab(QWidget):
     def _on_column_changed(self, *_):
         if self.search_input.text().strip():
             self.load_records()
+
+    def reset_page(self):
+        """Back to a fresh page: empty search, 'All Columns', nothing selected,
+        and the full list loaded from the database again."""
+        self._search_timer.stop()
+
+        # Block the signals while clearing, otherwise clearing the search box or
+        # changing the combo box would start extra searches of their own
+        self.search_input.blockSignals(True)
+        self.cmb_column.blockSignals(True)
+        self.search_input.clear()
+        self.cmb_column.setCurrentIndex(0)          # "All Columns"
+        self.search_input.blockSignals(False)
+        self.cmb_column.blockSignals(False)
+
+        self.load_records()                         # one query; also clears the selection and summary card
+        self.table.scrollToTop()
 
     def load_records(self):
         self._search_timer.stop()   # a pending typing-pause search is now redundant

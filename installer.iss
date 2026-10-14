@@ -2,14 +2,12 @@
 ; MyAppId: must be unique per program. If two programs share an ID, installing one will uninstall the other.
 ; MyAppExe: the exe name
 ; MySourceDir: the folder containing that exe and its _internal.
-; MyIcon: the .ico path, para sa icon ng installer/SetUp (remove kung default)
 
-#define MyAppName "MBPI Production"
-#define MyAppVersion "2.1.1"
-#define MyAppId "MBPI_Production_System"
+#define MyAppName "MBPI AR"
+#define MyAppVersion "1.0.0"
+#define MyAppId "MBPI_AR_System"
 #define MyAppExe "main.exe"
 #define MySourceDir "output\main"
-;#define MyIcon "css\img\production_icon.ico"
 
 [Setup]
 AppId={#MyAppId}
@@ -22,7 +20,6 @@ DefaultGroupName={#MyAppName}
 UsePreviousAppDir=yes
 CloseApplications=no
 RestartApplications=no
-;SetupIconFile={#MyIcon}
 UninstallDisplayIcon={app}\{#MyAppExe}
 OutputDir=installer_output
 OutputBaseFilename={#MyAppName}_Setup_v{#MyAppVersion}

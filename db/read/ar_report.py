@@ -10,16 +10,13 @@ SEARCH_COLUMNS = [
     ("Product Color", "prod_color"),
 ]
 
-# One SQL condition per key, each with a single %s for the search text.
-# These are fixed strings, never built from user input.
-# Product code / color look at ALL items of the receipt, even though the list only
-# shows the first item, so a receipt is found by any of its items.
+# SQL expression per key. These are fixed strings, never built from user input.
 _SEARCH = {
-    "ar_no": "CAST(h.ar_no AS TEXT) ILIKE %s",
-    "ar_date": "TO_CHAR(h.ar_date, 'MM/DD/YYYY') ILIKE %s",   # same format the table shows
-    "customer": "h.customer ILIKE %s",
-    "prod_code": "EXISTS (SELECT 1 FROM tbl_ar02 s WHERE s.ar_no = h.ar_no AND s.prod_code ILIKE %s)",
-    "prod_color": "EXISTS (SELECT 1 FROM tbl_ar02 s WHERE s.ar_no = h.ar_no AND s.prod_color ILIKE %s)",
+    "ar_no": "CAST(h.ar_no AS TEXT)",
+    "ar_date": "TO_CHAR(h.ar_date, 'MM/DD/YYYY')",   # same format the table shows
+    "customer": "h.customer",
+    "prod_code": "d.prod_code",
+    "prod_color": "d.prod_color",
 }
 
 
@@ -40,32 +37,24 @@ def _like(text):
 
 
 def get_records(search="", column="all"):
-    """One row per receipt (no repeats), no row limit. The item columns come from the
-    receipt's first item; item_count is how many items it has:
+    """One row per item, no row limit:
     (ar_no, ar_date, customer, prod_code, prod_color, quantity, qty_unit, is_canceled, item_count)"""
     where, params = "", []
     search = (search or "").strip()
     if search:
-        conditions = [_SEARCH[column]] if column in _SEARCH else list(_SEARCH.values())
-        where = "WHERE (" + " OR ".join(conditions) + ")"
-        params = [_like(search)] * len(conditions)
+        exprs = [_SEARCH[column]] if column in _SEARCH else list(_SEARCH.values())
+        where = "WHERE (" + " OR ".join(f"{e} ILIKE %s" for e in exprs) + ")"
+        params = [_like(search)] * len(exprs)
 
     return _fetch(f"""
-        SELECT h.ar_no, h.ar_date, h.customer, f.prod_code, f.prod_color,
-               f.quantity, f.qty_unit, h.is_canceled, COALESCE(c.item_count, 0)
+        SELECT h.ar_no, h.ar_date, h.customer, d.prod_code, d.prod_color,
+               d.quantity, d.qty_unit, h.is_canceled, COALESCE(c.item_count, 0)
         FROM tbl_ar01 h
-        -- the first item of each receipt (lowest sequence)
-        LEFT JOIN LATERAL (
-            SELECT d.prod_code, d.prod_color, d.quantity, d.qty_unit
-            FROM tbl_ar02 d
-            WHERE d.ar_no = h.ar_no
-            ORDER BY d.sequence, d.id
-            LIMIT 1
-        ) f ON TRUE
+        LEFT JOIN tbl_ar02 d ON d.ar_no = h.ar_no
         LEFT JOIN (SELECT ar_no, COUNT(*) AS item_count
                    FROM tbl_ar02 GROUP BY ar_no) c ON c.ar_no = h.ar_no
         {where}
-        ORDER BY h.ar_no DESC
+        ORDER BY h.ar_no DESC, d.sequence
     """, params)
 
 

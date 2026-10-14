@@ -15,7 +15,7 @@ from menu.ar_report.ar_audit import (describe_save, describe_update,
                                      normalize_item, workstation_mac)
 from print.print_ar import ARPrintPreview, build_print_data
 
-MAX_ITEMS = 4
+MAX_ITEMS = 5
 UNITS = ["KG.", "PC.", "PCS.", "MGS.", "GMS.", "SET.", "SETS."]
 COLUMNS = ["Qty", "Unit", "Product Code", "Product Color", "Lot No.", "Note"]
 
@@ -41,7 +41,7 @@ def _icon(name, color, active=None):
 
 
 class AREntryTab(QWidget):
-    """AR Entry: customer info + up to 4 item lines. Modes: idle / new / view / update."""
+    """AR Entry: customer info + up to 5 item lines. Modes: idle / new / view / update."""
 
     saved = pyqtSignal(int)        # ar_no
     close_requested = pyqtSignal()
@@ -108,7 +108,7 @@ class AREntryTab(QWidget):
         sum_card, sum_body = self._card("RECEIPT SUMMARY")
         srow = QHBoxLayout()
         srow.setSpacing(24)
-        self.lbl_count = QLabel("0 / 4")
+        self.lbl_count = QLabel(f"0 / {MAX_ITEMS}")
         self.lbl_count.setObjectName("CounterValue")
         self.lbl_by = QLabel("")
         self.lbl_by.setObjectName("InfoValue")
@@ -126,7 +126,7 @@ class AREntryTab(QWidget):
         grid.setVerticalSpacing(12)
 
         self.spin_qty = QDoubleSpinBox()
-        self.spin_qty.setDecimals(3)
+        self.spin_qty.setDecimals(2)
         self.spin_qty.setRange(0, 999_999_999)
         self.spin_qty.setGroupSeparatorShown(True)
         self.spin_qty.setButtonSymbols(QDoubleSpinBox.ButtonSymbols.NoButtons)
@@ -371,7 +371,7 @@ class AREntryTab(QWidget):
     def _append_row(self, qty, unit, code, color, lot, note):
         r = self.table.rowCount()
         self.table.insertRow(r)
-        values = [f"{qty:,.3f}", unit, code, color, lot, note]
+        values = [f"{qty:,.2f}", unit, code, color, lot, note]
         for c, text in enumerate(values):
             item = QTableWidgetItem(text)
             if c == 0:
@@ -546,7 +546,17 @@ class AREntryTab(QWidget):
             prepared_by=self.lbl_by.text(),
             items=rows,
         )
-        ARPrintPreview(data, parent=self.window()).show()
+        preview = ARPrintPreview(data, parent=self.window())
+        # The preview tells us when the receipt was really sent to the printer
+        preview.printed.connect(lambda printer, d=data: self._log_print(d, printer))
+        preview.show()
+
+    def _log_print(self, data, printer):
+        """Audit trail entry for a receipt that was sent to the printer."""
+        log_action("PRINT",
+                   f"AR NO: {data['ar_no']} for customer {data['customer']} "
+                   f"with {data['item_count']} item(s) printed on {printer}",
+                   username=self.username, mac_address=workstation_mac())
 
     # ── Form lifecycle ────────────────────────────────────────────────────
     def _clear_all(self):

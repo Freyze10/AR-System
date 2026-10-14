@@ -24,7 +24,7 @@ MODE_NEW = "new"        # after New: editable, Save enabled
 MODE_VIEW = "view"      # record loaded, read only, Save disabled
 MODE_UPDATE = "update"  # record loaded, editable, Save becomes Update
 
-PRINT_MODES = (MODE_VIEW,)   # modes in which the Print button is enabled
+PRINT_MODES = (MODE_VIEW, MODE_UPDATE)   # modes in which the Print button is enabled
 
 TITLES = {
     MODE_IDLE: ("Acknowledgement Receipt Entry",
@@ -165,6 +165,11 @@ class AREntryTab(QWidget):
         self.btn_add.setObjectName("PrimaryButton")
         self.btn_add.clicked.connect(self.add_item)
 
+        # Replaces the selected row with what is in the fields (same position in the table)
+        self.btn_update_item = QPushButton(" Update Item", icon=_icon("fa5s.edit", "white"))
+        self.btn_update_item.setObjectName("WarningButton")
+        self.btn_update_item.clicked.connect(self.update_item)
+
         self.btn_remove = QPushButton(" Remove", icon=_icon("fa5s.trash-alt", "#EF4444", "white"))
         self.btn_remove.setObjectName("DangerOutlineButton")
         self.btn_remove.clicked.connect(self.remove_item)
@@ -172,7 +177,7 @@ class AREntryTab(QWidget):
         self.btn_clear = QPushButton(" Clear", icon=_icon("fa5s.eraser", "#334155"))
         self.btn_clear.clicked.connect(self.clear_items)
 
-        for b in (self.btn_add, self.btn_remove, self.btn_clear):
+        for b in (self.btn_add, self.btn_update_item, self.btn_remove, self.btn_clear):
             actions.addWidget(b)
         item_body.addLayout(actions)
         root.addWidget(item_card)
@@ -287,8 +292,11 @@ class AREntryTab(QWidget):
         full = n >= MAX_ITEMS
 
         self.lbl_count.setText(f"{n} / {MAX_ITEMS}")
+        row_selected = self._selected_row() is not None
         self.btn_add.setEnabled(editable and self._fields_valid() and not full)
-        self.btn_remove.setEnabled(editable and self._selected_row() is not None)
+        # Needs a selected row and valid fields; works even when the receipt is full
+        self.btn_update_item.setEnabled(editable and row_selected and self._fields_valid())
+        self.btn_remove.setEnabled(editable and row_selected)
         self.btn_clear.setEnabled(editable and n > 0)
         self.btn_save.setEnabled(editable)
         self.btn_print.setEnabled(
@@ -298,6 +306,8 @@ class AREntryTab(QWidget):
             hint = "Click New to start a receipt."
         elif self.mode == MODE_VIEW:
             hint = "Viewing only. Select an item row to see its details."
+        elif row_selected:
+            hint = "Change the fields, then click Update Item to replace the selected row."
         elif full:
             hint = f"Maximum of {MAX_ITEMS} items per receipt reached."
         else:
@@ -368,24 +378,53 @@ class AREntryTab(QWidget):
         else:
             self._refresh_state()
 
+    def _write_row(self, r, qty, unit, code, color, lot, note):
+        """Put the values into table row r. Cells that already exist are changed in place,
+        so an updated row keeps its position."""
+        values = [f"{qty:,.2f}", unit, code, color, lot, note]
+        for c, text in enumerate(values):
+            item = self.table.item(r, c)
+            if item is None:                      # a brand new row: create its cells
+                item = QTableWidgetItem()
+                if c == 0:
+                    item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+                elif c == 1:
+                    item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                self.table.setItem(r, c, item)
+            item.setText(text)
+            if c == 0:
+                item.setData(Qt.ItemDataRole.UserRole, qty)   # the exact number, used when saving
+
     def _append_row(self, qty, unit, code, color, lot, note):
         r = self.table.rowCount()
         self.table.insertRow(r)
-        values = [f"{qty:,.2f}", unit, code, color, lot, note]
-        for c, text in enumerate(values):
-            item = QTableWidgetItem(text)
-            if c == 0:
-                item.setData(Qt.ItemDataRole.UserRole, qty)
-                item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-            elif c == 1:
-                item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.table.setItem(r, c, item)
+        self._write_row(r, qty, unit, code, color, lot, note)
 
     def add_item(self):
         if not self.btn_add.isEnabled():
             return
 
         self._append_row(
+            self.spin_qty.value(),
+            self.cmb_unit.currentText(),
+            self.txt_code.text().strip().upper(),
+            self.txt_color.text().strip().upper(),
+            self.txt_lot.text().strip(),
+            self.txt_note.text().strip(),
+        )
+        self.table.clearSelection()
+        self._set_fields()
+        self.spin_qty.setFocus()
+        self.spin_qty.selectAll()
+
+    def update_item(self):
+        """Replace the selected row with the values in the item fields (same position)."""
+        row = self._selected_row()
+        if row is None or not self.btn_update_item.isEnabled():
+            return
+
+        self._write_row(
+            row,
             self.spin_qty.value(),
             self.cmb_unit.currentText(),
             self.txt_code.text().strip().upper(),
@@ -473,9 +512,14 @@ class AREntryTab(QWidget):
             self.txt_customer.setFocus()
             return
         if self._item_dirty and self._fields_valid():
-            QMessageBox.warning(self, "Item Not Added",
-                                "The item in the form hasn't been added yet.\n"
-                                "Click Add to include it, or clear the item fields.")
+            if self._selected_row() is not None:
+                QMessageBox.warning(self, "Item Not Updated",
+                                    "The selected item was changed but not updated yet.\n"
+                                    "Click Update Item to apply the change.")
+            else:
+                QMessageBox.warning(self, "Item Not Added",
+                                    "The item in the form hasn't been added yet.\n"
+                                    "Click Add to include it, or clear the item fields.")
             return
         if self.table.rowCount() == 0:
             QMessageBox.warning(self, "No Items", "Add at least one item before saving.")
@@ -532,6 +576,11 @@ class AREntryTab(QWidget):
     def print_receipt(self):
         """Open the print preview for the receipt shown in the form."""
         if self.mode not in PRINT_MODES or self._current_ar_no is None:
+            return
+        # While updating, the print shows what is on screen, which may not be saved yet
+        if self.mode == MODE_UPDATE and self.has_unsaved() and not self._confirm(
+                "Unsaved Changes",
+                "This receipt has changes that are not saved yet.\nPrint it as shown now?"):
             return
 
         rows = [

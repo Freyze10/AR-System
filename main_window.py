@@ -53,7 +53,7 @@ class MainWindow(QMainWindow):
         self.stacked_widget.addWidget(self.ar_widget)   # Index 0: AR Record / Entry tabs
         self.stacked_widget.addWidget(AuditTrailWidget())  # Index 1: Audit Trail Placeholder
         if self.is_admin:
-            self.stacked_widget.addWidget(UserManagementWidget())  # Index 2: User Management
+            self.stacked_widget.addWidget(UserManagementWidget(username=self.username))  # Index 2: User Management
 
         main_layout.addWidget(self.stacked_widget)
         self.setCentralWidget(main_widget)

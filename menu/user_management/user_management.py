@@ -1,3 +1,5 @@
+from datetime import datetime
+
 import qtawesome as fa
 from PyQt6.QtCore import Qt, QStringListModel, pyqtSignal
 from PyQt6.QtWidgets import (
@@ -7,7 +9,9 @@ from PyQt6.QtWidgets import (
 )
 
 from db.read.user_management import get_roles, get_users, get_user, username_exists, get_role_usage, role_exists
+from db.write.audit_trail import log_action
 from db.write.user_management import update_user, add_user, delete_user, add_role, delete_role
+from menu.ar_report.ar_audit import workstation_mac
 
 MIN_PASSWORD = 6
 
@@ -15,6 +19,11 @@ MIN_PASSWORD = 6
 # ── Helpers ───────────────────────────────────────────────────────────────
 def _icon(name, color, active=None):
     return fa.icon(name, color=color, color_active=active or color, color_disabled="#94A3B8")
+
+
+def _now():
+    """Current time for the 'refreshed at' text next to the record count."""
+    return datetime.now().strftime("%I:%M:%S %p")
 
 
 def _db_error(parent, title, error):
@@ -79,6 +88,14 @@ def _make_table(columns):
     return table
 
 
+def _refresh_button(slot):
+    """The teal Refresh button used in the footer of both tabs."""
+    btn = QPushButton(" Refresh", icon=_icon("fa5s.sync-alt", "white"))
+    btn.setObjectName("PrimaryButton")
+    btn.clicked.connect(slot)
+    return btn
+
+
 def _password_field(placeholder):
     edit = QLineEdit()
     edit.setEchoMode(QLineEdit.EchoMode.Password)
@@ -99,8 +116,9 @@ def _password_field(placeholder):
 
 # ── Tab 1: User Accounts ──────────────────────────────────────────────────
 class UsersTab(QWidget):
-    def __init__(self):
+    def __init__(self, username="Brant"):
         super().__init__()
+        self.username = username
         self._editing_id = None
         self._build_ui()
         self.load_roles()
@@ -174,6 +192,7 @@ class UsersTab(QWidget):
         self.btn_delete.setObjectName("DangerOutlineButton")
         self.btn_delete.clicked.connect(self.delete_user)
 
+        footer.addWidget(_refresh_button(self.refresh))
         footer.addWidget(self.btn_edit)
         footer.addWidget(self.btn_delete)
         root.addLayout(footer)
@@ -211,8 +230,25 @@ class UsersTab(QWidget):
                     item.setData(Qt.ItemDataRole.UserRole, user_id)
                 self.table.setItem(r, c, item)
 
-        self.lbl_count.setText(f"{len(rows):,} account(s)")
+        # The time shows when the list was last read from the database
+        self.lbl_count.setText(f"{len(rows):,} account(s)  ·  refreshed {_now()}")
         self._on_selection()
+
+    def refresh(self):
+        """Read the roles and users from the database again (for example to see a
+        user's hostname, IP and MAC after their first login). The selected user stays
+        selected, and whatever is typed in the form is left alone."""
+        selected = self._selected()
+        self.load_roles()
+        self.load_users()
+        if selected:
+            self._select_user(selected[0])
+
+    def _select_user(self, user_id):
+        for r in range(self.table.rowCount()):
+            if self.table.item(r, 0).data(Qt.ItemDataRole.UserRole) == user_id:
+                self.table.selectRow(r)
+                return
 
     # ── Form mode ─────────────────────────────────────────────────────────
     def _set_mode(self, user_id=None):
@@ -277,8 +313,12 @@ class UsersTab(QWidget):
 
             if editing:
                 update_user(self._editing_id, role_id, username, password)
+                log_action("UPDATE", f"Updated user account '{username}'",
+                           username=self.username, mac_address=workstation_mac())  # Or pass current admin username if tracked
             else:
                 add_user(role_id, username, password)
+                log_action("SAVE", f"Created new user account '{username}'",
+                           username=self.username, mac_address=workstation_mac())
         except Exception as e:
             _db_error(self, "Could not save user", e)
             return
@@ -313,6 +353,8 @@ class UsersTab(QWidget):
 
         try:
             delete_user(user_id)
+            log_action("DELETE", f"Deleted user account '{username}'",
+                       username=self.username, mac_address=workstation_mac())
         except Exception as e:
             _db_error(self, "Could not delete user", e)
             return
@@ -326,8 +368,9 @@ class UsersTab(QWidget):
 class RolesTab(QWidget):
     roles_changed = pyqtSignal()
 
-    def __init__(self):
+    def __init__(self, username="Brant"):
         super().__init__()
+        self.username = username
         self._departments = []
         self.dept_model = QStringListModel(self)
         self._build_ui()
@@ -388,6 +431,7 @@ class RolesTab(QWidget):
         self.btn_delete = QPushButton(" Delete Role", icon=_icon("fa5s.trash-alt", "#DC2626", "white"))
         self.btn_delete.setObjectName("DangerOutlineButton")
         self.btn_delete.clicked.connect(self.delete_role)
+        footer.addWidget(_refresh_button(self.load_roles))
         footer.addWidget(self.btn_delete)
         root.addLayout(footer)
         self._on_selection()
@@ -413,7 +457,8 @@ class RolesTab(QWidget):
 
         self._departments = sorted({row[1] for row in rows})
         self.dept_model.setStringList(self._departments)
-        self.lbl_count.setText(f"{len(rows):,} role(s) in {len(self._departments):,} department(s)")
+        self.lbl_count.setText(
+            f"{len(rows):,} role(s) in {len(self._departments):,} department(s)  ·  refreshed {_now()}")
         self._on_selection()
 
     # ── Actions ───────────────────────────────────────────────────────────
@@ -437,6 +482,8 @@ class RolesTab(QWidget):
                 QMessageBox.warning(self, "Already Exists", f"'{dept} — {role}' already exists.")
                 return
             add_role(dept, role)
+            log_action("SAVE", f"Created department and role choice: '{dept} — {role}'",
+                       username=self.username, mac_address=workstation_mac())
         except Exception as e:
             _db_error(self, "Could not add role", e)
             return
@@ -473,6 +520,8 @@ class RolesTab(QWidget):
 
         try:
             delete_role(role_id)
+            log_action("DELETE", f"Deleted department and role choice: '{dept} — {role}'",
+                       username=self.username, mac_address=workstation_mac())
         except Exception as e:
             _db_error(self, "Could not delete role", e)
             return
@@ -484,10 +533,11 @@ class RolesTab(QWidget):
 class UserManagementWidget(QWidget):
     """User management: Tab 1 = user accounts, Tab 2 = departments & roles."""
 
-    def __init__(self):
+    def __init__(self, username="Brant"):
         super().__init__()
-        self.users_tab = UsersTab()
-        self.roles_tab = RolesTab()
+        self.username = username
+        self.users_tab = UsersTab(username=self.username)
+        self.roles_tab = RolesTab(username=self.username)
 
         self.tabs = QTabWidget()
         self.tabs.setObjectName("MainTabs")

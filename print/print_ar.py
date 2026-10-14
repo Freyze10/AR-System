@@ -231,7 +231,7 @@ def fill_sheet(ws, data, fit):
             qty.Value = item["qty"]
             qty.ShrinkToFit = True
             _put_text(_merge(ws, r, UNIT_COLS, XL_CENTER), item["unit"])
-            _put_text(_merge(ws, r, COLOR_COLS, XL_LEFT), item["prod_color"])   # left + bottom aligned
+            _put_text(_merge(ws, r, COLOR_COLS, XL_CENTER), item["prod_color"])   # left + bottom aligned
 
         # Product code: the first row, or any extra row that carries a wrapped piece of it
         if spec["first"] or spec["code"] is not None:

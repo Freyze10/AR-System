@@ -601,6 +601,7 @@ class AREntryTab(QWidget):
              *(self.table.item(r, c).text() for c in range(1, 6)))
             for r in range(self.table.rowCount())
         ]
+        # TODO: pass the Fullname of the user to the preparedby
         data = build_print_data(
             ar_no=self._current_ar_no,
             ar_date=self.date_ar.date().toPyDate(),

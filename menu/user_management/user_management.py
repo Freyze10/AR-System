@@ -115,6 +115,7 @@ def _password_field(placeholder):
 
 
 # ── Tab 1: User Accounts ──────────────────────────────────────────────────
+# TODO: ADD first name and lastname in the field for the user && update the database to contain fullname
 class UsersTab(QWidget):
     def __init__(self, username="Brant"):
         super().__init__()

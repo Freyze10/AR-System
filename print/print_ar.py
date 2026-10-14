@@ -29,6 +29,8 @@ from PyQt6.QtPdfWidgets import QPdfView
 from PyQt6.QtWidgets import (QComboBox, QHBoxLayout, QLabel, QMessageBox,
                              QPushButton, QVBoxLayout, QWidget)
 
+# TODO: Fix the print preview when displaying on the LX printer
+
 # Where the templates live. When the app is packaged with PyInstaller the files are
 # unpacked into sys._MEIPASS; otherwise we use the folder of this file.
 BASE_DIR = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))

@@ -80,3 +80,24 @@ def get_next_ar_no():
 def get_customers():
     return [r[0] for r in _fetch(
         "SELECT DISTINCT customer FROM tbl_ar01 WHERE customer <> '' ORDER BY customer")]
+
+
+def get_user_hostname(username):
+    """The hostname saved for this user in tbl_user (filled in at the user's first login), or None."""
+    rows = _fetch("SELECT hostname FROM tbl_user WHERE LOWER(username) = LOWER(%s)", (username,))
+    return rows[0][0] if rows and rows[0][0] else None
+
+
+def get_user_fullname(hostname, username):
+    """'First Last' of the user with this hostname AND username in tbl_user, or None.
+
+    Records saved before the hostname was added only hold the username. For those
+    (hostname is empty) the username alone is matched, since usernames are unique.
+    """
+    rows = _fetch("""
+        SELECT first_name, last_name
+        FROM tbl_user
+        WHERE LOWER(username) = LOWER(%s)
+          AND (%s = '' OR LOWER(hostname) = LOWER(%s))
+    """, (username, hostname, hostname))
+    return f"{rows[0][0]} {rows[0][1]}" if rows else None

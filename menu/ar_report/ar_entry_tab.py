@@ -8,7 +8,8 @@ from PyQt6.QtWidgets import (
     QMessageBox, QDateEdit, QDoubleSpinBox, QComboBox, QCompleter
 )
 
-from db.read.ar_report import get_customers, get_next_ar_no, get_receipt, get_receipt_items
+from db.read.ar_report import (get_customers, get_next_ar_no, get_receipt, get_receipt_items,
+                               get_user_fullname, get_user_hostname)
 from db.write.ar_report import update_receipt, create_receipt
 from db.write.audit_trail import log_action
 from menu.ar_report.ar_audit import (describe_save, describe_update,
@@ -50,7 +51,10 @@ class AREntryTab(QWidget):
     def __init__(self, username="Brant"):
         super().__init__()
         self.username = username
-        self.hostname = socket.gethostname()
+        # The PC this window is running on. Only for the audit trail, never shown in Prepared By.
+        self.pc_name = socket.gethostname()
+        # The user's OWN hostname saved in tbl_user. This is what Prepared By shows and saves.
+        self.db_hostname = self._load_db_hostname()
         self.mode = MODE_IDLE
         self._current_ar_no = None
         self._loaded_snapshot = None
@@ -269,10 +273,38 @@ class AREntryTab(QWidget):
                                *(self.table.item(r, c).text() for c in range(1, 6)))
                 for r in range(self.table.rowCount())]
 
-    # ── Mode / state ──────────────────────────────────────────────────────
-    def _me(self):
-        return f"{self.hostname}\\{self.username}"
+    # ── Prepared By ───────────────────────────────────────────────────────
+    def _load_db_hostname(self):
+        """The hostname saved for this user in the database (not the name of this PC)."""
+        try:
+            return get_user_hostname(self.username)
+        except Exception:
+            return None
 
+    def _me(self):
+        """'Hostname\\Username' with the user's own hostname from the database.
+
+        This is what Prepared By shows and what is saved with the receipt. If the user has
+        no hostname saved yet, it is just the username.
+        """
+        return f"{self.db_hostname}\\{self.username}" if self.db_hostname else self.username
+
+    def _prepared_by_fullname(self):
+        """The full name of whoever is written in Prepared By, for the printed form.
+
+        Prepared By looks like 'Hostname\\Username'. We split it at the backslash, find the
+        user with that hostname and username in tbl_user, and return 'First Last'.
+        If nobody matches (for example old records), the text is returned as it is.
+        """
+        text = self.lbl_by.text()
+        # No backslash in the text: hostname is "" and username is the whole text
+        hostname, _, username = text.rpartition("\\")
+        try:
+            return get_user_fullname(hostname.strip(), username.strip()) or text
+        except Exception:
+            return text
+
+    # ── Mode / state ──────────────────────────────────────────────────────
     def _set_mode(self, mode):
         self.mode = mode
         editable = mode in (MODE_NEW, MODE_UPDATE)
@@ -551,7 +583,10 @@ class AREntryTab(QWidget):
             "ar_date": self.date_ar.date().toPyDate(),
             "customer": customer[:128],
             "t_items": len(items),
-            "user": self.username[:128],
+            # 'Hostname\Username': saved as encoded_by (new receipt) or updated_by (update).
+            # It is the logged-in user, not the Prepared By text, which shows the original
+            # preparer while a receipt is being updated.
+            "user": self._me()[:128],
         }
 
         updating = self.mode == MODE_UPDATE
@@ -601,12 +636,11 @@ class AREntryTab(QWidget):
              *(self.table.item(r, c).text() for c in range(1, 6)))
             for r in range(self.table.rowCount())
         ]
-        # TODO: pass the Fullname of the user to the preparedby
         data = build_print_data(
             ar_no=self._current_ar_no,
             ar_date=self.date_ar.date().toPyDate(),
             customer=self.txt_customer.text(),
-            prepared_by=self.lbl_by.text(),
+            prepared_by=self._prepared_by_fullname(),   # the full name, not 'Hostname\Username'
             items=rows,
         )
         preview = ARPrintPreview(data, parent=self.window(),

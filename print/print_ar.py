@@ -546,6 +546,29 @@ class _Worker(QThread):
             self.failed.emit(str(e))
 
 
+class _HoverIconButton(QPushButton):
+    """A push button whose icon changes color while the mouse is over it.
+
+    Qt does not do this by itself for push buttons (the "active" icon color is only used
+    when the button has keyboard focus), so we swap the icon when the mouse enters and leaves.
+    """
+
+    def __init__(self, text, icon_name, normal_color, hover_color):
+        super().__init__(text)
+        # color_active is the same as color, so keyboard focus never changes the icon
+        self._normal_icon = fa.icon(icon_name, color=normal_color, color_active=normal_color)
+        self._hover_icon = fa.icon(icon_name, color=hover_color, color_active=hover_color)
+        self.setIcon(self._normal_icon)
+
+    def enterEvent(self, event):
+        self.setIcon(self._hover_icon)
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        self.setIcon(self._normal_icon)
+        super().leaveEvent(event)
+
+
 class ARPrintPreview(QWidget):
     """Window that shows the filled Excel template as a PDF and prints only when Print is clicked.
 
@@ -601,9 +624,13 @@ class ARPrintPreview(QWidget):
         self.btn_print.setObjectName("PrimaryButton")
         self.btn_print.clicked.connect(self.print_report)
 
-        btn_close = QPushButton(" Close", icon=fa.icon("fa5s.times", color="#DC2626", color_active="white"))
+        btn_close = _HoverIconButton(" Close", "fa5s.times", "#DC2626", "white")   # red icon, white on hover
         btn_close.setObjectName("DangerOutlineButton")
         btn_close.clicked.connect(self.close)
+        # When the window opens, Print and the lists are disabled (the preview is being built),
+        # so Close would be the only widget that can take focus and would show a focus look.
+        # Clicking is all this button needs, so it never takes keyboard focus.
+        btn_close.setFocusPolicy(Qt.FocusPolicy.NoFocus)
 
         bar.addWidget(lbl)
         bar.addWidget(self.cmb_printer, 1)

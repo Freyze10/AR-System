@@ -77,7 +77,7 @@ QTY_COL = "B"
 UNIT_COLS = ("C", "E")             # merged, centered
 CODE_COLS = ("F", "H")             # merged, centered
 COLOR_COLS = ("I", "J")            # merged, left aligned
-LOT_COLS = ("K", "Q")              # merged, left aligned
+LOT_COLS = ("K", "Q")              # merged, centered
 NOTE_COLS = ("B", "P")             # merged, left aligned, indented, placed on the rows after the item
 NOTE_INDENT = 9                   # how far the note is pushed to the right (Excel indent levels)
 FOOTER_COLS = ("B", "Q")           # merged, centered, placed right after the last item row
@@ -88,7 +88,7 @@ FOOTER_TEXT = "*****NOTHING FOLLOWS*****"
 # blocks start one column later. Quantity, unit, notes and the footer are the same.
 WIDE_CODE_COLS = ("F", "I")        # merged, centered
 WIDE_COLOR_COLS = ("J", "K")       # merged, left aligned
-WIDE_LOT_COLS = ("L", "Q")         # merged, left aligned
+WIDE_LOT_COLS = ("L", "Q")         # merged, centered
 
 # Extra space (in points) kept free when checking whether a piece of text fits in a cell.
 FIT_MARGIN_PTS = 2.0
@@ -375,8 +375,9 @@ def fill_sheet(ws, data, fit, wide=False):
         item = spec["item"]
         if spec["first"]:
             qty = ws.Range(f"{QTY_COL}{r}")
-            qty.NumberFormat = "#,##0.000"        # 10 -> 10.000
+            qty.NumberFormat = "#,##0.00"        # 10 -> 10.00
             qty.Value = item["qty"]
+            qty.HorizontalAlignment = XL_CENTER   # quantity is centered in its column
             qty.ShrinkToFit = True
             _put_text(_merge(ws, r, UNIT_COLS, XL_CENTER), item["unit"])
             _put_text(_merge(ws, r, color_cols, XL_CENTER), item["prod_color"])    # left + bottom aligned
@@ -387,9 +388,9 @@ def fill_sheet(ws, data, fit, wide=False):
             if spec["code"]:
                 _put_text(cell, spec["code"])
 
-        # Lot number: same idea as the product code, but left + bottom aligned
+        # Lot number: same idea as the product code, centered + bottom aligned
         if spec["first"] or spec["lot"] is not None:
-            cell = _merge(ws, r, lot_cols, XL_LEFT)
+            cell = _merge(ws, r, lot_cols, XL_CENTER)
             if spec["lot"]:
                 _put_text(cell, spec["lot"])
 

@@ -10,6 +10,7 @@ from PyQt6.QtWidgets import (
     QLabel, QFrame, QPushButton, QStackedWidget, QStatusBar, QMessageBox
 )
 
+from workstation.workstation import get_ethernet_ip
 from menu.audit_trail.audit_trail import AuditTrailWidget
 from styles.styles import AppStyles
 from menu.ar_report.ar_report import AcknowledgementReceiptWidget
@@ -135,7 +136,11 @@ class MainWindow(QMainWindow):
         self.setStatusBar(self.status_bar)
         self.time_label = QLabel()
 
-        for status in [self.time_label, QLabel(" PC: MBPI-IT"), QLabel(" IP: 192.168.1.50")]:
+        # This PC's real name and IP address (the same helper that login uses).
+        # "—" is shown when no network connection is found.
+        ip = get_ethernet_ip() or "—"
+
+        for status in [self.time_label, QLabel(f" PC: {self.hostname}"), QLabel(f" IP: {ip}")]:
             self.status_bar.addPermanentWidget(status)
 
         self.time_timer = QTimer(self, timeout=self.update_time)

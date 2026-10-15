@@ -4,6 +4,9 @@ The big picture:
   1. The entry tab gives us the receipt data (header + items).
   2. We open the Excel template (ar_template.xlsx, or the wide one) in a hidden Excel,
      set the paper size the user picked, and fill in its cells.
+     (For dot matrix printers like the EPSON LX, the preview is drawn with the Windows
+     PDF printer, because Excel draws dotted, low resolution text for them.
+     Printing still goes to the printer the user chose.)
   3. We save the filled copy as an .xlsx file and also export it as a PDF.
   4. The window shows that PDF as the preview. The .xlsx is only sent to the printer
      (through Excel) when the user clicks Print.
@@ -16,6 +19,7 @@ import os
 import shutil
 import sys
 import tempfile
+import threading
 from contextlib import contextmanager
 
 import pythoncom                     # needed to use COM from a background thread
@@ -28,8 +32,6 @@ from PyQt6.QtPdf import QPdfDocument
 from PyQt6.QtPdfWidgets import QPdfView
 from PyQt6.QtWidgets import (QComboBox, QHBoxLayout, QLabel, QMessageBox,
                              QPushButton, QVBoxLayout, QWidget)
-
-# TODO: Fix the print preview when displaying on the LX printer
 
 # Where the templates live. When the app is packaged with PyInstaller the files are
 # unpacked into sys._MEIPASS; otherwise we use the folder of this file.
@@ -44,6 +46,16 @@ PREFERRED_PRINTER = "LX"
 
 # First item of the paper list: keep the paper size saved inside the template.
 TEMPLATE_PAPER_LABEL = "(Template default)"
+
+# Dot matrix printers (like the EPSON LX) make Excel draw the preview with low resolution
+# printer fonts, so the preview looks dotted and the font looks different, even though the
+# real print is fine. For those printers the preview is drawn with the Windows PDF printer
+# instead (the printer with this text in its name).
+PDF_PRINTER_HINT = "Print to PDF"
+
+# Only one Excel job at a time: every job switches the Windows default printer while it
+# runs, so two jobs must never overlap.
+_JOB_LOCK = threading.Lock()
 
 # ── Template layout (ar_template.xlsx) ────────────────────────────────────
 # Excel cell address for each header value on the form.
@@ -129,6 +141,25 @@ def pick_printer(names):
         return names[0] if names else ""
 
 
+def is_dot_matrix(printer_name):
+    """True for dot matrix printers: the preferred (LX) printer or any ESC/P printer."""
+    name = (printer_name or "").upper()
+    return PREFERRED_PRINTER.upper() in name or "ESC/P" in name
+
+
+def pick_preview_printer(selected, names):
+    """The printer Excel draws the preview with.
+
+    That is the selected printer, except for dot matrix printers: those use the Windows
+    PDF printer when there is one (its text is smooth), otherwise the selected printer.
+    """
+    if is_dot_matrix(selected):
+        for name in names:
+            if PDF_PRINTER_HINT.upper() in name.upper():
+                return name
+    return selected
+
+
 def get_paper_sizes(printer_name):
     """Paper sizes the printer offers, as [(paper_id, name), ...].
 
@@ -167,9 +198,19 @@ def _printer_as_default(printer_name):
 
 
 def _apply_paper(ws, paper_id):
-    """Uses the chosen paper size on the sheet. None = keep the paper size saved in the template."""
-    if paper_id:
+    """Uses the chosen paper size on the sheet. None = keep the paper size saved in the template.
+
+    Returns False when Excel refuses the paper size. That happens for user defined sizes
+    added in the printer's settings (like "AR"): Excel can only set the standard Windows
+    paper sizes. The sheet then keeps the paper size saved in the template.
+    """
+    if not paper_id:
+        return True
+    try:
         ws.PageSetup.PaperSize = paper_id
+        return True
+    except Exception:
+        return False
 
 
 # ── Layout logic (no Excel needed) ────────────────────────────────────────
@@ -180,8 +221,14 @@ def split_to_fit(text, fits):
     We split on spaces. A single word that is longer than a whole line is cut by
     characters, so nothing is ever lost. Empty text gives [].
     """
+    text = " ".join((text or "").split())      # one clean line (no double spaces / line breaks)
+    if not text:
+        return []
+    if fits(text):                              # the usual case: it all fits on one line,
+        return [text]                           # so we only had to measure once
+
     lines, current = [], ""
-    for word in (text or "").split():
+    for word in text.split():
         # Try to add the word to the line we are building
         trial = f"{current} {word}" if current else word
         if fits(trial):
@@ -287,12 +334,22 @@ def fill_sheet(ws, data, fit, wide=False):
     def fits_for(cols, indent=0):
         first = f"{cols[0]}{FIRST_ROW}"
         font = _font(ws, first)                                      # the font used in that block
+        size = font[1]                                               # font size in points
         width = ws.Range(f"{cols[0]}{FIRST_ROW}:{cols[1]}{FIRST_ROW}").Width   # block width in points
         # An indent pushes the text right, so it takes space from the line.
         # One indent level is about the width of 3 spaces.
-        indent_pts = indent * (fit.width("   X", font) - fit.width("X", font))
+        indent_pts = 0
+        if indent:
+            indent_pts = indent * (fit.width("   X", font) - fit.width("X", font))
         limit = width - indent_pts - FIT_MARGIN_PTS
-        return lambda text: fit.width(text, font) <= limit
+
+        def fits(text):
+            # Short text always fits: even the widest letter is about one font size wide, so
+            # when that many characters fit we do not need to ask Excel (asking is slow)
+            if len(text) * size + 8 <= limit:
+                return True
+            return fit.width(text, font) <= limit
+        return fits
 
     # 3. Work out the rows needed (long codes, lots and notes wrap onto extra rows)
     rows = plan_rows(data["items"], fits_for(code_cols), fits_for(lot_cols),
@@ -346,6 +403,8 @@ def _new_excel():
     excel = win32com.client.DispatchEx("Excel.Application")
     excel.Visible = False
     excel.DisplayAlerts = False        # no pop-up questions from Excel
+    excel.ScreenUpdating = False       # nothing is drawn on screen, so do not spend time on it
+    excel.EnableEvents = False         # no workbook events (faster)
     return excel
 
 
@@ -362,11 +421,14 @@ class _ExcelFit:
         self.col = self.wb.Worksheets(1).Columns(1)
         self.cell.NumberFormat = "@"
         self._cache = {}
+        self._font = None              # the font set on the cell right now
 
     def width(self, text, font):
         key = (text, font)
         if key not in self._cache:
-            self.cell.Font.Name, self.cell.Font.Size, self.cell.Font.Bold = font
+            if font != self._font:     # only talk to Excel about the font when it changes
+                self.cell.Font.Name, self.cell.Font.Size, self.cell.Font.Bold = font
+                self._font = font
             self.cell.Value = text
             self.col.AutoFit()
             self._cache[key] = self.col.Width
@@ -376,26 +438,45 @@ class _ExcelFit:
         self.wb.Close(False)           # False = do not save the scratch workbook
 
 
-def render_files(template_path, xlsx_path, pdf_path, data, printer_name="", paper_id=None):
+def render_files(template_path, xlsx_path, pdf_path, data, printer_name="", paper_id=None,
+                 notes=None, on_ready=None):
     """Fills the template, then saves the filled copy (.xlsx) and a PDF of it (for the preview).
 
     printer_name / paper_id decide the page size used for the PDF and saved in the copy.
+    notes:    a list; a message is added to it when something could not be done exactly
+              (for example the paper size could not be set).
+    on_ready: called as soon as the PDF exists, before Excel is closed, so the preview
+              can show right away while Excel finishes closing in the background.
     """
     if not os.path.exists(template_path):
         raise FileNotFoundError(f"Template not found:\n{template_path}")
+    if notes is None:
+        notes = []
 
     # The wide template has its own column blocks (see WIDE_CODE_COLS and so on)
     wide = os.path.abspath(template_path) == os.path.abspath(TEMPLATE_WIDE_PATH)
 
+    # Excel draws the preview for one printer. Dot matrix printers get the PDF printer.
+    try:
+        draw_printer = pick_preview_printer(printer_name, list_printers())
+    except Exception:
+        draw_printer = printer_name
+    # A paper id only means the same thing on another printer if that printer knows it.
+    # (Standard sizes like Letter or A4 are known everywhere; user defined sizes are not.)
+    if draw_printer != printer_name and paper_id not in [i for i, _ in get_paper_sizes(draw_printer)]:
+        paper_id = None
+
     pythoncom.CoInitialize()           # required before using COM in a background thread
     try:
-        with _printer_as_default(printer_name):
+        with _JOB_LOCK, _printer_as_default(draw_printer):
             excel = _new_excel()
+            wb = None
             try:
-                # ReadOnly: the template itself is never changed
-                wb = excel.Workbooks.Open(os.path.abspath(template_path), ReadOnly=True)
+                # ReadOnly: the template itself is never changed. UpdateLinks=0: do not refresh links.
+                wb = excel.Workbooks.Open(os.path.abspath(template_path), UpdateLinks=0, ReadOnly=True)
                 ws = wb.ActiveSheet
-                _apply_paper(ws, paper_id)
+                if not _apply_paper(ws, paper_id):
+                    notes.append("Excel cannot use this paper size, so the template's paper size is used.")
 
                 fit = _ExcelFit(excel)
                 try:
@@ -406,9 +487,20 @@ def render_files(template_path, xlsx_path, pdf_path, data, printer_name="", pape
                 wb.Activate()
                 wb.SaveCopyAs(os.path.abspath(xlsx_path))                 # the filled .xlsx used for printing
                 ws.ExportAsFixedFormat(0, os.path.abspath(pdf_path))      # 0 = PDF, used for the preview
-                wb.Close(False)
+
+                if on_ready is not None:
+                    on_ready()                 # show the preview now; closing Excel can wait
             finally:
-                excel.Quit()
+                # Cleanup problems must not turn a good preview into an error message
+                try:
+                    if wb is not None:
+                        wb.Close(False)
+                except Exception:
+                    pass
+                try:
+                    excel.Quit()
+                except Exception:
+                    pass
     finally:
         pythoncom.CoUninitialize()
 
@@ -417,12 +509,12 @@ def print_xlsx(xlsx_path, printer_name, paper_id=None):
     """Prints the filled sheet through Excel on the chosen printer and paper size."""
     pythoncom.CoInitialize()
     try:
-        with _printer_as_default(printer_name):
+        with _JOB_LOCK, _printer_as_default(printer_name):
             excel = _new_excel()
             try:
-                wb = excel.Workbooks.Open(os.path.abspath(xlsx_path), ReadOnly=True)
+                wb = excel.Workbooks.Open(os.path.abspath(xlsx_path), UpdateLinks=0, ReadOnly=True)
                 ws = wb.ActiveSheet
-                _apply_paper(ws, paper_id)       # same paper size as the preview
+                _apply_paper(ws, paper_id)       # if Excel refuses it, the saved paper size is used
                 ws.PrintOut(Copies=1)
                 wb.Close(False)
             finally:
@@ -437,14 +529,19 @@ class _Worker(QThread):
     ok = pyqtSignal()                  # sent when the call finished fine
     failed = pyqtSignal(str)           # sent with the error message if it failed
 
-    def __init__(self, fn, *args):
+    def __init__(self, fn, *args, early=False):
         super().__init__()
         self.fn, self.args = fn, args
+        self.early = early             # True: the job itself says when its result is ready
 
     def run(self):
         try:
-            self.fn(*self.args)
-            self.ok.emit()
+            if self.early:
+                # The job calls on_ready as soon as the result is usable (before it cleans up)
+                self.fn(*self.args, on_ready=self.ok.emit)
+            else:
+                self.fn(*self.args)
+                self.ok.emit()
         except Exception as e:
             self.failed.emit(str(e))
 
@@ -461,7 +558,8 @@ class ARPrintPreview(QWidget):
         super().__init__(parent)
         self.data = data
         self.template_path = template_path     # which Excel template this preview is built from
-        self._worker = None            # the background job currently running
+        self._workers = []             # background jobs that are still running
+        self._notes = []               # messages from the last preview build (shown next to the paper size)
         self._ready = False            # True once the preview PDF of the current printer/paper is loaded
         self._printer = ""             # the printer that was chosen when Print was clicked
         self._build_no = 0             # counts preview builds, so every build gets its own files
@@ -574,12 +672,18 @@ class ARPrintPreview(QWidget):
         self.cmb_printer.setEnabled(not busy)
         self.cmb_paper.setEnabled(not busy)
 
-    def _run(self, fn, *args, done):
-        """Runs fn(*args) in the background; calls done() when it finishes, or shows an error."""
-        self._worker = _Worker(fn, *args)
-        self._worker.ok.connect(done)
-        self._worker.failed.connect(self._on_error)
-        self._worker.start()
+    def _run(self, fn, *args, done, early=False):
+        """Runs fn(*args) in the background; calls done() when it finishes, or shows an error.
+
+        early=True: done() is called as soon as the job says its result is ready, even though
+        it is still cleaning up. Every running job is kept in a list so none is dropped while running.
+        """
+        worker = _Worker(fn, *args, early=early)
+        worker.ok.connect(done)
+        worker.failed.connect(self._on_error)
+        worker.finished.connect(lambda w=worker: self._workers.remove(w) if w in self._workers else None)
+        self._workers.append(worker)
+        worker.start()
 
     def _on_error(self, msg):
         self.btn_print.setText(" Print")
@@ -604,16 +708,17 @@ class ARPrintPreview(QWidget):
         self.xlsx_path = os.path.join(self.tmp_dir, f"ar_{self._build_no}.xlsx")
         self.pdf_path = os.path.join(self.tmp_dir, f"ar_{self._build_no}.pdf")
 
+        self._notes = []               # the job adds messages here, for example "paper size not used"
         self._set_busy(True, "Preparing preview...")
         self._run(render_files, self.template_path, self.xlsx_path, self.pdf_path, self.data,
-                  self.cmb_printer.currentText(), self.cmb_paper.currentData(),
-                  done=self._show_pdf)
+                  self.cmb_printer.currentText(), self.cmb_paper.currentData(), self._notes,
+                  done=self._show_pdf, early=True)
 
     def _show_pdf(self):
         """Called when the PDF is ready: load it into the viewer and allow printing."""
         self.pdf_doc.load(self.pdf_path)
         self._ready = True
-        self._set_busy(False)
+        self._set_busy(False, "  ".join(self._notes))     # empty unless something could not be done exactly
 
     # ── Printing ──────────────────────────────────────────────────────────
     def print_report(self):
@@ -632,8 +737,8 @@ class ARPrintPreview(QWidget):
 
     def closeEvent(self, event):
         # Wait for any running Excel job, then clean up the temp files
-        if self._worker is not None and self._worker.isRunning():
-            self._worker.wait()
+        for worker in list(self._workers):
+            worker.wait()
         self.pdf_doc.close()  # release the PDF file so the temp folder can be deleted
         shutil.rmtree(self.tmp_dir, ignore_errors=True)
         super().closeEvent(event)

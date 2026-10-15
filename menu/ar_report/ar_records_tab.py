@@ -9,7 +9,7 @@ from PyQt6.QtWidgets import (
 from db.read.ar_report import SEARCH_COLUMNS, get_records
 from util.debounce import finished_typing
 
-COLUMNS = ["AR No.", "AR Date", "Customer", "Product Code", "Product Color", "Quantity / Unit", "Count"]
+COLUMNS = ["AR No.", "AR Date", "Customer", "Product Code", "Product Color", "Quantity / Unit", "No of Items"]
 
 CENTER = Qt.AlignmentFlag.AlignCenter
 RIGHT = Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter

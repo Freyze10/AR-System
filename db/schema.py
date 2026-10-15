@@ -32,6 +32,8 @@ def create_table():
             CREATE TABLE IF NOT EXISTS tbl_user(
                 user_id SERIAL PRIMARY KEY,
                 role_id INT NOT NULL,
+                first_name VARCHAR(50) NOT NULL,
+                last_name  VARCHAR(50) NOT NULL,
                 hostname VARCHAR(36),
                 ip_address VARCHAR(32),
                 username VARCHAR(50) NOT NULL,

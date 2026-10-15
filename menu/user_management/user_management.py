@@ -115,7 +115,6 @@ def _password_field(placeholder):
 
 
 # ── Tab 1: User Accounts ──────────────────────────────────────────────────
-# TODO: ADD first name and lastname in the field for the user && update the database to contain fullname
 class UsersTab(QWidget):
     def __init__(self, username="Brant"):
         super().__init__()
@@ -137,17 +136,26 @@ class UsersTab(QWidget):
         grid.setHorizontalSpacing(16)
         grid.setVerticalSpacing(12)
 
+        # Created in the order they appear, so the Tab key goes through them in that order
+        self.txt_first = QLineEdit()
+        self.txt_first.setPlaceholderText("e.g. Juan")
+        self.txt_first.setMaxLength(50)          # tbl_user.first_name is VARCHAR(50)
+        self.txt_last = QLineEdit()
+        self.txt_last.setPlaceholderText("e.g. Dela Cruz")
+        self.txt_last.setMaxLength(50)           # tbl_user.last_name is VARCHAR(50)
         self.txt_username = QLineEdit()
         self.txt_username.setPlaceholderText("e.g. jdelacruz")
         self.txt_username.setMaxLength(50)
+        self.cmb_role = QComboBox()
         self.txt_password = _password_field(f"At least {MIN_PASSWORD} characters")
         self.txt_confirm = _password_field("Re-enter password")
-        self.cmb_role = QComboBox()
 
-        grid.addLayout(_field("Username", self.txt_username, True), 0, 0)
-        grid.addLayout(_field("Role (Department — Role)", self.cmb_role, True), 0, 1)
-        grid.addLayout(_field("Password", self.txt_password, True), 1, 0)
-        grid.addLayout(_field("Confirm Password", self.txt_confirm, True), 1, 1)
+        grid.addLayout(_field("First Name", self.txt_first, True), 0, 0)
+        grid.addLayout(_field("Last Name", self.txt_last, True), 0, 1)
+        grid.addLayout(_field("Username", self.txt_username, True), 1, 0)
+        grid.addLayout(_field("Role (Department — Role)", self.cmb_role, True), 1, 1)
+        grid.addLayout(_field("Password", self.txt_password, True), 2, 0)
+        grid.addLayout(_field("Confirm Password", self.txt_confirm, True), 2, 1)
         grid.setColumnStretch(0, 1)
         grid.setColumnStretch(1, 1)
         body.addLayout(grid)
@@ -171,8 +179,9 @@ class UsersTab(QWidget):
 
         self.txt_confirm.returnPressed.connect(self.save_user)
 
-        # Table
-        self.table = _make_table(["Username", "Department", "Role", "Hostname", "IP Address", "MAC Address"])
+        # Table (the username stays in column 0: that cell also holds the user id)
+        self.table = _make_table(["Username", "Full Name", "Department", "Role",
+                                  "Hostname", "IP Address", "MAC Address"])
         self.table.itemSelectionChanged.connect(self._on_selection)
         self.table.cellDoubleClicked.connect(lambda *_: self.edit_user())
         root.addWidget(self.table, 1)
@@ -223,8 +232,8 @@ class UsersTab(QWidget):
 
         self.table.setRowCount(0)
         self.table.setRowCount(len(rows))
-        for r, (user_id, username, dept, role, host, ip, mac) in enumerate(rows):
-            values = [username, dept, role, host or "—", ip or "—", mac or "—"]
+        for r, (user_id, first, last, username, dept, role, host, ip, mac) in enumerate(rows):
+            values = [username, f"{first} {last}", dept, role, host or "—", ip or "—", mac or "—"]
             for c, text in enumerate(values):
                 item = QTableWidgetItem(text)
                 if c == 0:
@@ -260,12 +269,14 @@ class UsersTab(QWidget):
         self.btn_clear.setText(" Cancel" if editing else " Clear")
 
     def clear_form(self):
+        self.txt_first.clear()
+        self.txt_last.clear()
         self.txt_username.clear()
         self.txt_password.clear()
         self.txt_confirm.clear()
         self.cmb_role.setCurrentIndex(0)
         self._set_mode(None)
-        self.txt_username.setFocus()
+        self.txt_first.setFocus()
 
     def edit_user(self):
         sel = self._selected()
@@ -283,21 +294,29 @@ class UsersTab(QWidget):
             self.load_users()
             return
 
-        username, role_id, password = user
+        username, role_id, password, first_name, last_name = user
+        self.txt_first.setText(first_name)
+        self.txt_last.setText(last_name)
         self.txt_username.setText(username)
         self.txt_password.setText(password)
         self.txt_confirm.setText(password)
         self.cmb_role.setCurrentIndex(max(self.cmb_role.findData(role_id), 0))
         self._set_mode(user_id)
-        self.txt_username.setFocus()
+        self.txt_first.setFocus()
 
     # ── Actions ───────────────────────────────────────────────────────────
     def save_user(self):
+        first = self.txt_first.text().strip()
+        last = self.txt_last.text().strip()
         username = self.txt_username.text().strip()
         password = self.txt_password.text()
         confirm = self.txt_confirm.text()
         role_id = self.cmb_role.currentData()
 
+        if not first:
+            return self._warn("First Name", "Please enter the first name.", self.txt_first)
+        if not last:
+            return self._warn("Last Name", "Please enter the last name.", self.txt_last)
         if len(username) < 3:
             return self._warn("Username", "Username must be at least 3 characters.", self.txt_username)
         if role_id is None:
@@ -313,12 +332,12 @@ class UsersTab(QWidget):
                 return self._warn("Username Taken", f"The username '{username}' already exists.", self.txt_username)
 
             if editing:
-                update_user(self._editing_id, role_id, username, password)
-                log_action("UPDATE", f"Updated user account '{username}'",
-                           username=self.username, mac_address=workstation_mac())  # Or pass current admin username if tracked
+                update_user(self._editing_id, role_id, username, password, first, last)
+                log_action("UPDATE", f"Updated user account '{username}' ({first} {last})",
+                           username=self.username, mac_address=workstation_mac())
             else:
-                add_user(role_id, username, password)
-                log_action("SAVE", f"Created new user account '{username}'",
+                add_user(role_id, username, password, first, last)
+                log_action("SAVE", f"Created new user account '{username}' ({first} {last})",
                            username=self.username, mac_address=workstation_mac())
         except Exception as e:
             _db_error(self, "Could not save user", e)

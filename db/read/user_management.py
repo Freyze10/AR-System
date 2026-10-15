@@ -36,9 +36,9 @@ def role_exists(department, role):
 
 # ── Users ─────────────────────────────────────────────────────────────────
 def get_users():
-    """[(user_id, username, department, role, hostname, ip_address, mac_address), ...]"""
+    """[(user_id, first_name, last_name, username, department, role, hostname, ip_address, mac_address), ...]"""
     return _fetch("""
-        SELECT u.user_id, u.username, r.department, r.role,
+        SELECT u.user_id, u.first_name, u.last_name, u.username, r.department, r.role,
                u.hostname, u.ip_address, m.mac_address
         FROM tbl_user u
         JOIN tbl_role r ON r.role_id = u.role_id
@@ -48,8 +48,10 @@ def get_users():
 
 
 def get_user(user_id):
-    """(username, role_id, password) or None"""
-    rows = _fetch("SELECT username, role_id, password FROM tbl_user WHERE user_id = %s", (user_id,))
+    """(username, role_id, password, first_name, last_name) or None"""
+    rows = _fetch(
+        "SELECT username, role_id, password, first_name, last_name FROM tbl_user WHERE user_id = %s",
+        (user_id,))
     return rows[0] if rows else None
 
 

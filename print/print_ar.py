@@ -213,6 +213,32 @@ def _apply_paper(ws, paper_id):
         return False
 
 
+def _fit_to_page_width(excel, ws):
+    """Makes the sheet shrink (never grow) so all its columns fit on one page wide.
+
+    The template prints at a fixed scale. When a PC gives Excel a page that is narrower than
+    the form (a different printer, a paper size Excel cannot use, other margins), the right
+    side of the form moves to a second page and the preview looks cut. With "fit to one page
+    wide" the form always fits. On PCs where it already fits, nothing changes (it stays 100%).
+    """
+    try:
+        excel.PrintCommunication = False      # do the page setup changes in one go (much faster)
+    except Exception:
+        pass                                  # older Excel versions do not have this
+    try:
+        page = ws.PageSetup
+        page.Zoom = False                     # use "fit to" instead of a fixed scale
+        page.FitToPagesWide = 1               # all columns on one page
+        page.FitToPagesTall = False           # as many pages tall as needed
+    except Exception:
+        pass                                  # if Excel refuses, the template's own scale is used
+    finally:
+        try:
+            excel.PrintCommunication = True
+        except Exception:
+            pass
+
+
 # ── Layout logic (no Excel needed) ────────────────────────────────────────
 def split_to_fit(text, fits):
     """Splits text into lines so that every line passes fits(line).
@@ -478,6 +504,7 @@ def render_files(template_path, xlsx_path, pdf_path, data, printer_name="", pape
                 ws = wb.ActiveSheet
                 if not _apply_paper(ws, paper_id):
                     notes.append("Excel cannot use this paper size, so the template's paper size is used.")
+                _fit_to_page_width(excel, ws)     # the page may be narrower than the form on some PCs
 
                 fit = _ExcelFit(excel)
                 try:

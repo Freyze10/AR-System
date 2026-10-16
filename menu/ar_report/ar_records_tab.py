@@ -88,6 +88,7 @@ class ARRecordsTab(QWidget):
 
     view_requested = pyqtSignal(int)    # ar_no
     update_requested = pyqtSignal(int)  # ar_no
+    print_requested = pyqtSignal(int)   # ar_no: open the print preview (standard form); sent on double-click
 
     def __init__(self):
         super().__init__()
@@ -168,8 +169,8 @@ class ARRecordsTab(QWidget):
             self.table.setColumnWidth(col, width)
 
         self.table.selectionModel().selectionChanged.connect(self._on_selection_changed)
-        # Double-click behaves like the View button
-        self.table.doubleClicked.connect(lambda *_: self._emit_for_selected(self.view_requested))
+        # Double-click = the View button, and the print preview opens too
+        self.table.doubleClicked.connect(self._on_double_click)
         root.addWidget(self.table, 1)
 
         # Footer: record count + actions
@@ -272,6 +273,12 @@ class ARRecordsTab(QWidget):
     def _set_actions_enabled(self, enabled):
         self.btn_update.setEnabled(enabled)
         self.btn_view.setEnabled(enabled)
+
+    def _on_double_click(self, *_):
+        """Double-click: open the record like the View button does, and open the print preview too.
+        Only the double-click does the second part; the View button stays a plain View."""
+        self._emit_for_selected(self.view_requested)
+        self._emit_for_selected(self.print_requested)
 
     def _emit_for_selected(self, signal):
         ar_no = self._selected_ar_no()

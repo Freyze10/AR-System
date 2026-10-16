@@ -15,6 +15,7 @@ class AcknowledgementReceiptWidget(QWidget):
         super().__init__()
         self.records_tab = ARRecordsTab()
         self.entry_tab = AREntryTab(username)
+        self.records_tab.print_requested.connect(lambda ar_no: self.entry_tab.print_receipt(ar_no))
 
         self.tabs = QTabWidget()
         self.tabs.setObjectName("MainTabs")

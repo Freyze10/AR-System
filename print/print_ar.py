@@ -20,6 +20,7 @@ import shutil
 import sys
 import tempfile
 import threading
+import time
 from contextlib import contextmanager
 
 import pythoncom                     # needed to use COM from a background thread
@@ -46,6 +47,11 @@ PREFERRED_PRINTER = "LX"
 
 # First item of the paper list: keep the paper size saved inside the template.
 TEMPLATE_PAPER_LABEL = "(Template default)"
+
+# True: if the form is wider than the page, it is shrunk to fit on one page wide, so the
+# preview is not cut. It never enlarges the form. False: only the scale saved in the template is used.
+# (The paper size list is not affected either way.)
+FIT_TO_PAGE_WIDTH = True
 
 # Dot matrix printers (like the EPSON LX) make Excel draw the preview with low resolution
 # printer fonts, so the preview looks dotted and the font looks different, even though the
@@ -160,23 +166,35 @@ def pick_preview_printer(selected, names):
     return selected
 
 
-def get_paper_sizes(printer_name):
+def get_paper_sizes(printer_name, errors=None):
     """Paper sizes the printer offers, as [(paper_id, name), ...].
 
     Windows reports the user-defined sizes added in the printer's settings too.
     The id is the number Excel uses for that paper size.
+
+    The printer can be slow or briefly unreachable (a network printer), so it is asked twice.
+    errors: optional list; the reason is added to it when no sizes could be read.
     """
-    try:
-        handle = win32print.OpenPrinter(printer_name)
+    reason = ""
+    for attempt in range(2):
         try:
-            port = win32print.GetPrinter(handle, 2)["pPortName"]
-        finally:
-            win32print.ClosePrinter(handle)
-        ids = win32print.DeviceCapabilities(printer_name, port, win32con.DC_PAPERS) or []
-        names = win32print.DeviceCapabilities(printer_name, port, win32con.DC_PAPERNAMES) or []
-    except Exception:
-        return []                                  # printer offline / no info: only the template paper is offered
-    return [(int(i), str(n).strip("\x00 ")) for i, n in zip(ids, names)]
+            handle = win32print.OpenPrinter(printer_name)
+            try:
+                port = win32print.GetPrinter(handle, 2)["pPortName"]
+            finally:
+                win32print.ClosePrinter(handle)
+            ids = win32print.DeviceCapabilities(printer_name, port, win32con.DC_PAPERS) or []
+            names = win32print.DeviceCapabilities(printer_name, port, win32con.DC_PAPERNAMES) or []
+            if ids:
+                return [(int(i), str(n).strip("\x00 ")) for i, n in zip(ids, names)]
+            reason = "the printer gave no paper sizes"
+        except Exception as e:
+            reason = str(e)
+        if attempt == 0:
+            time.sleep(0.4)                    # a short pause, then one more try
+    if errors is not None:
+        errors.append(reason)
+    return []                                  # printer offline / no info
 
 
 @contextmanager
@@ -504,7 +522,8 @@ def render_files(template_path, xlsx_path, pdf_path, data, printer_name="", pape
                 ws = wb.ActiveSheet
                 if not _apply_paper(ws, paper_id):
                     notes.append("Excel cannot use this paper size, so the template's paper size is used.")
-                _fit_to_page_width(excel, ws)     # the page may be narrower than the form on some PCs
+                if FIT_TO_PAGE_WIDTH:
+                    _fit_to_page_width(excel, ws)     # the page may be narrower than the form on some PCs
 
                 fit = _ExcelFit(excel)
                 try:
@@ -611,6 +630,7 @@ class ARPrintPreview(QWidget):
         self.template_path = template_path     # which Excel template this preview is built from
         self._workers = []             # background jobs that are still running
         self._notes = []               # messages from the last preview build (shown next to the paper size)
+        self._papers_note = ""         # message when the paper list could not be read from the printer
         self._ready = False            # True once the preview PDF of the current printer/paper is loaded
         self._printer = ""             # the printer that was chosen when Print was clicked
         self._build_no = 0             # counts preview builds, so every build gets its own files
@@ -709,11 +729,46 @@ class ARPrintPreview(QWidget):
         printer = self.cmb_printer.currentText().replace("\\", "_").replace("/", "_")
         return f"paper/{printer}"
 
+    def _paper_list_key(self):
+        """Settings key that remembers the paper LIST the selected printer gave last time."""
+        printer = self.cmb_printer.currentText().replace("\\", "_").replace("/", "_")
+        return f"papers/{printer}"
+
+    def _saved_papers(self):
+        """The paper list this printer gave last time, as [(paper_id, name), ...]."""
+        raw = self._settings.value(self._paper_list_key(), [])
+        if isinstance(raw, str):                    # QSettings gives a plain string for a one item list
+            raw = [raw]
+        sizes = []
+        for item in raw or []:
+            paper_id, _, name = str(item).partition("|")
+            if paper_id.isdigit() and name:
+                sizes.append((int(paper_id), name))
+        return sizes
+
     def _load_papers(self):
-        """Fills the paper list for the selected printer and selects the one used last time."""
+        """Fills the paper list for the selected printer and selects the one used last time.
+
+        The list comes from the printer. If the printer does not answer (offline, busy, network
+        problem), the list it gave last time is used, so the paper choices do not disappear.
+        """
+        errors = []
+        sizes = get_paper_sizes(self.cmb_printer.currentText(), errors)
+        self._papers_note = ""
+        self.cmb_paper.setToolTip("")
+        if sizes:
+            self._settings.setValue(self._paper_list_key(), [f"{i}|{n}" for i, n in sizes])
+        else:
+            sizes = self._saved_papers()
+            if sizes:
+                self._papers_note = "The printer did not answer, so the last known paper list is shown."
+            else:
+                self._papers_note = "Could not read the paper sizes from the printer."
+            self.cmb_paper.setToolTip("Reason: " + "; ".join(errors) if errors else "")
+
         self.cmb_paper.clear()
         self.cmb_paper.addItem(TEMPLATE_PAPER_LABEL, None)   # None = do not change the template's paper
-        for paper_id, name in get_paper_sizes(self.cmb_printer.currentText()):
+        for paper_id, name in sizes:
             self.cmb_paper.addItem(name, paper_id)
         saved = str(self._settings.value(self._paper_key(), ""))
         self.cmb_paper.setCurrentIndex(max(self.cmb_paper.findText(saved), 0))
@@ -773,7 +828,8 @@ class ARPrintPreview(QWidget):
         """Called when the PDF is ready: load it into the viewer and allow printing."""
         self.pdf_doc.load(self.pdf_path)
         self._ready = True
-        self._set_busy(False, "  ".join(self._notes))     # empty unless something could not be done exactly
+        notes = ([self._papers_note] if self._papers_note else []) + self._notes
+        self._set_busy(False, "  ".join(notes))     # empty unless something could not be done exactly
 
     # ── Printing ──────────────────────────────────────────────────────────
     def print_report(self):

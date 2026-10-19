@@ -42,6 +42,22 @@ def _icon(name, color, active=None):
     return fa.icon(name, color=color, color_active=active or color, color_disabled="#94A3B8")
 
 
+def _force_uppercase(edit):
+    """Turns everything the user types or pastes into this text box into UPPERCASE.
+
+    textEdited is only sent when the USER changes the text (typing, pasting), not when the
+    program fills the box (for example when a receipt is loaded), so loaded data is shown as saved.
+    """
+    def to_upper(text):
+        upper = text.upper()
+        if upper != text:
+            position = edit.cursorPosition()      # keep the cursor where the user was typing
+            edit.setText(upper)
+            edit.setCursorPosition(position)
+
+    edit.textEdited.connect(to_upper)
+
+
 class AREntryTab(QWidget):
     """AR Entry: customer info + up to 5 item lines. Modes: idle / new / view / update."""
 
@@ -148,6 +164,10 @@ class AREntryTab(QWidget):
         self.txt_lot.setPlaceholderText("Optional")
         self.txt_note = QLineEdit()
         self.txt_note.setPlaceholderText("Optional")
+
+        # Everything typed in the text boxes becomes UPPERCASE (customer, code, color, lot, note)
+        for edit in (self.txt_customer, self.txt_code, self.txt_color, self.txt_lot, self.txt_note):
+            _force_uppercase(edit)
 
         grid.addLayout(self._field("Quantity", self.spin_qty, True), 0, 0)
         grid.addLayout(self._field("Unit", self.cmb_unit, True), 0, 1)

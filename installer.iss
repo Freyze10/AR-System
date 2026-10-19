@@ -8,11 +8,13 @@
 #define MyAppId "MBPI_AR_System"
 #define MyAppExe "main.exe"
 #define MySourceDir "output\main"
+#define MyAppPublisher "Masterbatch Philippines, INC."
 
 [Setup]
 AppId={#MyAppId}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
+AppPublisher={#MyAppPublisher}
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 DefaultDirName={autopf}\{#MyAppName}

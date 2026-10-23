@@ -80,6 +80,7 @@ class AREntryTab(QWidget):
         self.customer_model = QStringListModel(self)
         self._build_ui()
         self.reset_form()
+        self.new_receipt()
 
     # ── UI ────────────────────────────────────────────────────────────────
     def _build_ui(self):

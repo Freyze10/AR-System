@@ -2,6 +2,7 @@ import socket
 
 import qtawesome as fa
 from PyQt6.QtCore import Qt, QDate, QStringListModel, pyqtSignal
+from PyQt6.QtGui import QKeySequence
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QLineEdit, QPushButton,
     QTableWidget, QTableWidgetItem, QHeaderView, QFrame, QAbstractItemView,
@@ -234,6 +235,10 @@ class AREntryTab(QWidget):
         self.btn_print_wide = QPushButton(" Print Wide", icon=_icon("fa5s.print", "white"))
         self.btn_print_wide.setObjectName("SecondaryButton")
         self.btn_print_wide.clicked.connect(lambda: self.print_receipt(wide=True))
+        # Ctrl+P = Print Wide. A button shortcut only works while the button is enabled and
+        # visible, so it follows the same rules as clicking the button.
+        self.btn_print_wide.setShortcut(QKeySequence("Ctrl+P"))
+        self.btn_print_wide.setToolTip("Print Wide  (Ctrl+P)")
 
         self.btn_print = QPushButton(" Print", icon=_icon("fa5s.print", "white"))
         self.btn_print.setObjectName("SecondaryButton")

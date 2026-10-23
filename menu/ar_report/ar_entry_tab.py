@@ -632,10 +632,30 @@ class AREntryTab(QWidget):
         QMessageBox.information(
             self, "Saved",
             f"Acknowledgement Receipt {ar_no:07d} {'updated' if updating else 'saved'}.")
-        self.saved.emit(ar_no)
-        self.reset_form()
+        self.saved.emit(ar_no)                       # refreshes the list in the Record tab
+        self._continue_with_saved(ar_no, header)     # stay on this receipt, ready to print or update again
         if updating:
             self.close_requested.emit()   # back to the Record tab
+
+    def _continue_with_saved(self, ar_no, header):
+        """Keeps the receipt that was just saved on screen, as if it was opened with Update.
+
+        That way it can be printed right away (Print is enabled in Update mode), and changing
+        it again and clicking Update saves those changes to the same receipt.
+        """
+        self._current_ar_no = ar_no
+        self.txt_ar_no.setText(f"{ar_no:07d}")
+        self.txt_customer.setText(header["customer"])     # shown exactly as it was saved
+
+        # The form is now the saved version: it is what "unsaved changes" is compared with,
+        # and what the next update's audit text compares against
+        self._loaded_snapshot = self._snapshot()
+        self._loaded = {"customer": header["customer"], "ar_date": header["ar_date"],
+                        "items": self._items_from_table()}
+
+        self.table.clearSelection()
+        self._set_fields()                                # empty item fields, nothing selected
+        self._set_mode(MODE_UPDATE)                       # title, Update button and Print buttons
 
     # ── Printing ──────────────────────────────────────────────────────────
     def print_receipt(self, wide=False):
